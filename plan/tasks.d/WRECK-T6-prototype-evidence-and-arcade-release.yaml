@@ -17,7 +17,6 @@
     - scripts/check-arena.mjs
     - tests/unit/arena-holdouts.test.ts
     - tests/e2e/release.spec.ts
-    - src/game/Settings.tsx
     - src/styles.css
     - README.md
     - vercel.json
