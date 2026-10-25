@@ -1,5 +1,5 @@
 - id: WRECK-T1
-  title: Bootstrap the mobile-first React game with an independent simulation contract
+  title: Build the mobile-first driving foundation with an independent simulation contract
   repo: wreckterra
   depends_on: []
   priority: 1.1
@@ -23,15 +23,13 @@
     - src/sim/contracts.ts
     - src/sim/world.ts
     - tests/unit/foundation.test.ts
-    - .github/workflows/ci.yml
-    - .github/workflows/ci-gate.yml
     - AGENTS.md
     - .remudero/principles.yaml
   status: queued
   dispatch_hold: true
   attempts: 0
   rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
-  design: Create a small React/Vite/TypeScript/Three/Rapier foundation for Wreckterra under existing Vercel deployment conventions. Keep fixed-tick seeded simulation, versioned input/events/snapshots and local-authority interface independent of rendering and React. Start with original placeholder geometry. Install real test/typecheck/build/quality commands and pinned CI actions, always-reporting ci-gate and security checks; measure nonzero quality baselines from meaningful tests before applying inherited protection, never invent a measured floor. Include tests/unit and later browser roots in the exact registered Wreckterra profile. No unbounded install/build loop, new paid provider or server simulation. No copyrighted franchise assets. Provide an accessible non-WebGL/error state and a visible playable initial driving surface, not only a menu. Bootstrap is onboarding preparation; trusted gameplay dispatch waits for actual target runner acceptance. Core W1-T10614 and product C4 evidence are upstream readiness requirements, not foreign dependency IDs. The production call-site proof pins createWorld in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
+  design: Extend the qualified React/Vite/TypeScript starter with a small Three/Rapier driving foundation for Wreckterra under existing Vercel deployment conventions. Keep fixed-tick seeded simulation, versioned input/events/snapshots and local-authority interface independent of rendering and React. Start with original placeholder geometry. Reuse the existing real test/typecheck/build/quality commands and pinned .github/workflows/ci.yml, whose always-reporting ci-gate job already gates typecheck, coverage, build and security. Do not edit or create workflow files in this task. Add meaningful simulation tests to the existing Vitest unit root; preserve measured quality floors, security checks and branch protection, never invent a measured floor. Include tests/unit and later browser roots in the exact registered Wreckterra profile. No unbounded install/build loop, new paid provider or server simulation. No copyrighted franchise assets. Provide an accessible non-WebGL/error state and a visible playable initial driving surface, not only a menu. The merged starter PR2 is onboarding preparation, not gameplay credit. Trusted gameplay dispatch waits for actual target runner acceptance and the Console product C4 admission flow. Core W1-T10614 and product C4 evidence are upstream readiness requirements, not foreign dependency IDs. The production call-site proof pins createWorld in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
   acceptance:
     - claim: the simulation advances fixed ticks independently of React
       proof: "unit test: WRECK-T1: the simulation advances fixed ticks independently of React"
