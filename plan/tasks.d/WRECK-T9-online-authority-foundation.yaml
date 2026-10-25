@@ -1,0 +1,34 @@
+- id: WRECK-T9
+  title: Validate the later online authority against loss reconnect and deployment boundaries
+  repo: wreckterra
+  depends_on:
+    - WRECK-T4
+    - WRECK-T7
+  priority: 1.1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/network/protocol.ts
+    - src/network/authority.ts
+    - src/sim/contracts.ts
+    - tests/unit/network-authority.test.ts
+    - docs/online-spike.md
+  status: queued
+  dispatch_hold: true
+  attempts: 0
+  rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
+  design: Keep solo local authority and implement a bounded later-online comparison with existing-host capacity evidence, not an unconditional new room service. Clients send inputs; server owns movement validation/damage/pickups/encounters/rewards and exact map/rules versions. Do not assume all browser calculations replay identically. Evaluate current Vercel WebSocket duration/instance coordination and a reversible dedicated-room option only within authorized resource caps; no obsolete blanket WebSocket claim and no spare Redis inference from signaling. Inject loss/latency/reconnect/owner failure/deploy and duration crossing, one fenced room owner, idempotent rewards and reliable snapshots. Do not claim multiplayer shipped from an adapter.
+  acceptance:
+    - claim: reconnect and owner changes preserve one authoritative room
+      proof: "unit test: WRECK-T9: reconnect and owner changes preserve one authoritative room"
+    - claim: clients cannot self award damage pickups or progression
+      proof: "unit test: WRECK-T9: clients cannot self award damage pickups or progression"
+    - claim: network peers reject mismatched map rules and protocol versions
+      proof: "unit test: WRECK-T9: network peers reject mismatched map rules and protocol versions"
+  falsifier: Remove the corresponding input, identity, invariant, source validation or evidence guard independently. Its discriminating unit/browser proof must fail and pass on restoration. Confirm actual nonzero test counts; pin artifacts and compare the same units. Physical-device and live deployment receipts remain separate from fixtures.
