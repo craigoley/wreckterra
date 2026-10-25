@@ -1,0 +1,41 @@
+- id: WRECK-T4
+  title: Ship the first complete mobile Central Park skirmish
+  repo: wreckterra
+  depends_on:
+    - WRECK-T2
+    - WRECK-T3
+  priority: 1.1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/sim/combat.ts
+    - src/sim/bots.ts
+    - src/sim/weapons.ts
+    - src/sim/vehicles.ts
+    - src/game/VehicleScene.tsx
+    - src/game/Hud.tsx
+    - src/App.tsx
+    - src/styles.css
+    - tests/unit/combat.test.ts
+    - tests/e2e/match.spec.ts
+  status: queued
+  dispatch_hold: true
+  attempts: 0
+  rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
+  design: Deliver training and a 3-6 minute timed solo battle with three independently designed vehicles and four bots. Mica/Switchback scout, Idris/Rivet brawler and Tess/Ballast heavy are working original concepts, with original silhouettes/specials; preserve roles rather than renamed copies. Basic gun heat, rockets/homing/mines, pickups, health/boost, telegraphed rechargeable special, damage/ramming/defeat/results/restart must work. Soft targeting obeys range/cone/line of sight. Bots route, avoid obstacles, seek pickups, retreat and recover. Bounded destructible authored props only. No LLM in the frame loop. Full match, restart and versioned replay use exact arena/rules identity. Human fun/location recognition/originality and 15-minute physical-device acceptance are explicit separate receipts. The production call-site proof pins advanceCombat in src/game/VehicleScene.tsx; implement that actual runtime integration, never a comment or unused wrapper.
+  acceptance:
+    - claim: a complete Central Park match reaches results and restarts cleanly
+      proof: "unit test: WRECK-T4: a complete Central Park match reaches results and restarts cleanly"
+    - claim: bots cannot attack through cover or remain trapped indefinitely
+      proof: "unit test: WRECK-T4: bots cannot attack through cover or remain trapped indefinitely"
+    - claim: damage pickups and replay cannot duplicate rewards or actors
+      proof: "unit test: WRECK-T4: damage pickups and replay cannot duplicate rewards or actors"
+    - claim: the playable runtime consumes the implemented mechanism
+      proof: "grep: advanceCombat( in src/game/VehicleScene.tsx"
+  falsifier: Remove the corresponding input, identity, invariant, source validation or evidence guard independently. Its discriminating unit/browser proof must fail and pass on restoration. Confirm actual nonzero test counts; pin artifacts and compare the same units. Physical-device and live deployment receipts remain separate from fixtures.

@@ -1,0 +1,36 @@
+- id: WRECK-T6
+  title: Qualify and release the Central Park prototype with independent device and deployment receipts
+  repo: wreckterra
+  depends_on:
+    - WRECK-T4
+  priority: 1.1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - scripts/benchmark.mjs
+    - scripts/check-arena.mjs
+    - tests/unit/arena-holdouts.test.ts
+    - tests/e2e/release.spec.ts
+    - src/styles.css
+    - README.md
+    - vercel.json
+    - docs/release-evidence.md
+  status: queued
+  dispatch_hold: true
+  attempts: 0
+  rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
+  design: Create reproducible held-out geography/bot/replay/performance checks with source/build/seed/device/network identity and positive failure controls. Bind existing authorized Vercel project via product flow and verify exact deployment SHA and public complete-match route. Preserve local/hosted/review/merge/deploy/playability receipt boundaries; no browser fixture as physical-device proof. Measure load, warm p95, bounded memory populations and input interruptions on actual iPhone/Safari/Android/Chrome when available; request only concrete remaining operator device input. Keep Vercel same setup/caps; no domain purchase. Add actual verified game to cao825/oley-arcade through its own reviewed PR, not an out-of-root edit. Feed observed defects as bounded improvement proposals; no auto objective/gate/budget changes or production promotion.
+  acceptance:
+    - claim: release checks pin exact arena build and deployment identities
+      proof: "unit test: WRECK-T6: release checks pin exact arena build and deployment identities"
+    - claim: a missing phone or live-route receipt cannot read as verified
+      proof: "unit test: WRECK-T6: a missing phone or live-route receipt cannot read as verified"
+    - claim: held out arena and device regressions block candidate promotion
+      proof: "unit test: WRECK-T6: held out arena and device regressions block candidate promotion"
+  falsifier: Remove the corresponding input, identity, invariant, source validation or evidence guard independently. Its discriminating unit/browser proof must fail and pass on restoration. Confirm actual nonzero test counts; pin artifacts and compare the same units. Physical-device and live deployment receipts remain separate from fixtures.

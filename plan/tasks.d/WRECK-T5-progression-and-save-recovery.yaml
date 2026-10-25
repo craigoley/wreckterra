@@ -1,0 +1,37 @@
+- id: WRECK-T5
+  title: Add fair vehicle mastery and interruption-safe local progress
+  repo: wreckterra
+  depends_on:
+    - WRECK-T4
+  priority: 1.1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/progress/profile.ts
+    - src/progress/rewards.ts
+    - src/game/Garage.tsx
+    - src/App.tsx
+    - src/styles.css
+    - tests/unit/progress.test.ts
+    - tests/e2e/save-recovery.spec.ts
+  status: queued
+  dispatch_hold: true
+  attempts: 0
+  rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
+  design: Create account-free versioned local saves with migrations, idempotent per-match rewards and export/import. Recover corrupt/evicted storage explicitly. Unlock sidegrade vehicles/loadouts and mastery cosmetics with test-drive access, not escalating damage or pay-to-win. Curated World Tour and survival contracts may grant passport badges; map search/favorites/travel are never grind gated. Ordinary exploration fuel unlimited, no forced daily attendance or energy timer. Save before leaving/checkpoint/renderer loss and keep durable progress separate from GPU resources. Offline results are unverified until later authoritative economy migration; no fabricated cross-device sync. The production call-site proof pins awardMatch in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
+  acceptance:
+    - claim: replaying a match result rewards mastery only once
+      proof: "unit test: WRECK-T5: replaying a match result rewards mastery only once"
+    - claim: corrupt or denied local storage recovers without pretending progress saved
+      proof: "unit test: WRECK-T5: corrupt or denied local storage recovers without pretending progress saved"
+    - claim: vehicle unlocks preserve sidegrade budgets and geographic access
+      proof: "unit test: WRECK-T5: vehicle unlocks preserve sidegrade budgets and geographic access"
+    - claim: the playable runtime consumes the implemented mechanism
+      proof: "grep: awardMatch( in src/App.tsx"
+  falsifier: Remove the corresponding input, identity, invariant, source validation or evidence guard independently. Its discriminating unit/browser proof must fail and pass on restoration. Confirm actual nonzero test counts; pin artifacts and compare the same units. Physical-device and live deployment receipts remain separate from fixtures.
