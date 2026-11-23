@@ -29,7 +29,123 @@
   attempts: 0
   note: "Hold released 2026-11-03 on the operator's direction to adopt Wreckterra as a fleet repo. Readiness checked at core f15de9f: the owned web test profile is registered (src/lib/review.ts, owner craigoley, repo wreckterra, vitest roots tests/), and the native one-job path for a daemonless managed target is merged (W1-T10799, #15041). WRECK-T2..T6 stay held behind this frontier."
   rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
-  design: Extend the qualified React/Vite/TypeScript starter with a small Three/Rapier driving foundation for Wreckterra under existing Vercel deployment conventions. Keep fixed-tick seeded simulation, versioned input/events/snapshots and local-authority interface independent of rendering and React. Start with original placeholder geometry. Reuse the existing real test/typecheck/build/quality commands and pinned .github/workflows/ci.yml, whose always-reporting ci-gate job already gates typecheck, coverage, build and security. Do not edit or create workflow files in this task. Add meaningful simulation tests to the existing Vitest unit root; preserve measured quality floors, security checks and branch protection, never invent a measured floor. Include tests/unit and later browser roots in the exact registered Wreckterra profile. No unbounded install/build loop, new paid provider or server simulation. No copyrighted franchise assets. Provide an accessible non-WebGL/error state and a visible playable initial driving surface, not only a menu. The merged starter PR2 is onboarding preparation, not gameplay credit. Trusted gameplay dispatch waits for actual target runner acceptance and the Console product C4 admission flow. Core W1-T10614 and product C4 evidence are upstream readiness requirements, not foreign dependency IDs. The production call-site proof pins createWorld in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
+  design: |
+    Extend the qualified React/Vite/TypeScript starter with a small Three/Rapier driving foundation for Wreckterra under existing Vercel deployment conventions. Keep fixed-tick seeded simulation, versioned input/events/snapshots and local-authority interface independent of rendering and React. Start with original placeholder geometry. Reuse the existing real test/typecheck/build/quality commands and pinned .github/workflows/ci.yml, whose always-reporting ci-gate job already gates typecheck, coverage, build and security. Do not edit or create workflow files in this task. Add meaningful simulation tests to the existing Vitest unit root; preserve measured quality floors, security checks and branch protection, never invent a measured floor. Include tests/unit and later browser roots in the exact registered Wreckterra profile. No unbounded install/build loop, new paid provider or server simulation. No copyrighted franchise assets. Provide an accessible non-WebGL/error state and a visible playable initial driving surface, not only a menu. The merged starter PR2 is onboarding preparation, not gameplay credit. Trusted gameplay dispatch waits for actual target runner acceptance and the Console product C4 admission flow. Core W1-T10614 and product C4 evidence are upstream readiness requirements, not foreign dependency IDs. The production call-site proof pins createWorld in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
+    NO-INVARIANTS: the repository has only the starter garage and no playable driving, so no prior player-visible behavior has to be kept.
+
+    Approved product brief:
+    {
+      "decisions": [
+        {
+          "key": "Original identity",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use original vehicles, drivers, names, visual identities and lore inspired by broad vehicular-combat roles. Preserve the desired combat appeal without copying distinctive Twisted Metal characters, assets or text."
+        },
+        {
+          "key": "First release",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Solo first with training and short skirmishes, three original vehicles and four bots. Keep input commands, events, snapshots and authority boundaries versioned for later online multiplayer."
+        },
+        {
+          "key": "Mobile priority",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Build a React browser game, without a React Native version. Prioritize touch play and mobile performance on iPhone Safari and Android Chrome while supporting desktop keyboard and gamepad. The operator has an iPhone for the first actual device check; record Android emulation and physical Android evidence separately."
+        },
+        {
+          "key": "Real places",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Start with the Bethesda Terrace area of Central Park using the pinned OpenStreetMap fixture. Preserve recognizable roads, water, bridges and landmarks, with explicit driveability adaptations."
+        },
+        {
+          "key": "Geographic expansion",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "After the curated prototype, support selecting or searching arbitrary locations through a map with a governed cached geography compiler. Retain World Drive as a later bounded streaming mode."
+        },
+        {
+          "key": "Progression",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use useful early access to modes and locations, cosmetics and balanced vehicle sidegrades. Do not make players grind to access their favorite geographic place."
+        },
+        {
+          "key": "Existing setup",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use React and the existing Remudero, Vercel and OleyArcade setup. Additional services, purchases, DNS changes or higher spending limits require their own authorization."
+        },
+        {
+          "key": "Console lifecycle",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use Console to capture and resume the product, adopt the existing public craigoley/wreckterra repository, verify onboarding, file a versioned plan and admit the first gameplay build. Preserve separate source, tests, review, merge, deployment and device evidence."
+        },
+        {
+          "key": "Mobile resilience and measured quality",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "For the solo web prototype, pause simulation and audio when the page is hidden, clear held controls on cancellation or layout changes, and resume from an explicit tap without a catch-up burst. Recover WebGL through the supported renderer path from the same versioned match state; show a recoverable fallback when unavailable. Bound render resolution and adapt visual quality from sustained measured frame times without changing physics. Record real device/browser performance and a physical iPhone playthrough separately from browser emulation. Online authority and reconnect behavior remain later multiplayer work."
+        }
+      ],
+      "idea": "Wreckterra is a mobile-first browser vehicular-combat game in OleyArcade. Drive original combat vehicles through recognizable real-world locations compiled from OpenStreetMap, starting with a bounded Central Park arena. Build solo combat first, with foundations for later online multiplayer, map-selected arenas and streamed World Drive.",
+      "name": "Wreckterra",
+      "objective": "Deliver a playable mobile-first Bethesda Terrace/Central Park training and skirmish prototype through the Remudero Console new-product flow, using the existing public repository and existing resource limits.",
+      "portfolio": "OleyArcade",
+      "research": [
+        {
+          "label": "OpenStreetMap attribution and license",
+          "url": "https://www.openstreetmap.org/copyright"
+        },
+        {
+          "label": "R3F performance guidance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/pitfalls"
+        },
+        {
+          "label": "Rapier determinism boundary",
+          "url": "https://rapier.rs/docs/user_guides/javascript/determinism/"
+        },
+        {
+          "label": "R3F scaling and rendering performance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/scaling-performance"
+        },
+        {
+          "label": "MDN multi-pointer input and pointer capture",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+        },
+        {
+          "label": "MDN mobile page visibility and lifecycle",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
+        },
+        {
+          "label": "MDN bounded WebGL rendering practices",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices"
+        },
+        {
+          "label": "MDN WebGL context restoration",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/webglcontextrestored_event"
+        }
+      ],
+      "resourceEnvelope": {
+        "budgetUsd": 30,
+        "existingSetupOnly": true,
+        "maxConcurrentBuilds": 1
+      }
+    }
+
+    Task origin: product-plan#prd_ca604fb69b319193b4d5128b6c858d4b/pplan-936136b66a775defaf206ec2
   acceptance:
     - claim: the simulation advances fixed ticks independently of React
       proof: "unit test: WRECK-T1: the simulation advances fixed ticks independently of React"
