@@ -1,0 +1,68 @@
+{
+  "version": "product-plan-requirement-map-v1",
+  "operationId": "936136b66a775defaf206ec278e9ffa876ea3b4b3c84181172615a0e2c66fdb2",
+  "briefDigest": "41f1d9edd88339336ff7d3411e91008f6b4ace176f29fb5bb523d77d838cc84f",
+  "objectiveRevision": 5,
+  "targetHead": "5e084cce1b6f248fd1f5de9374fc44284ab3f6a1",
+  "inventoryDigest": "2c4878fbc7e9416919d68e3757fb757d5ec24d7c0411c6ffdbc4f7f6b4c1f0a8",
+  "entries": [
+    {
+      "source": "/idea",
+      "status": "linked",
+      "taskId": "WRECK-T4",
+      "proof": "unit test: WRECK-T4: a complete Central Park match reaches results and restarts cleanly"
+    },
+    {
+      "source": "/decisions/0",
+      "status": "deferred",
+      "rationale": "Originality of vehicles, drivers, names and lore is specified in WRECK-T4 design and AGENTS.md, but per WRECK-T4 it is an explicit separate human receipt; no executable proof can establish it."
+    },
+    {
+      "source": "/decisions/1",
+      "status": "linked",
+      "taskId": "WRECK-T1",
+      "proof": "unit test: WRECK-T1: the simulation advances fixed ticks independently of React"
+    },
+    {
+      "source": "/decisions/2",
+      "status": "linked",
+      "taskId": "WRECK-T2",
+      "proof": "unit test: WRECK-T2: touch keyboard and gamepad feed the same simulation contract"
+    },
+    {
+      "source": "/decisions/3",
+      "status": "linked",
+      "taskId": "WRECK-T3",
+      "proof": "unit test: WRECK-T3: Central Park preserves pinned geographic identity and source attribution"
+    },
+    {
+      "source": "/decisions/4",
+      "status": "deferred",
+      "rationale": "Map-selected arenas and World Drive come after the curated prototype; they are preserved as reserved roadmap records WRECK-T7 and WRECK-T8 in plan/roadmap.md, outside the dispatch plan."
+    },
+    {
+      "source": "/decisions/5",
+      "status": "linked",
+      "taskId": "WRECK-T5",
+      "proof": "unit test: WRECK-T5: vehicle unlocks preserve sidegrade budgets and geographic access"
+    },
+    {
+      "source": "/decisions/6",
+      "status": "linked",
+      "taskId": "WRECK-T6",
+      "proof": "unit test: WRECK-T6: release checks pin exact arena build and deployment identities"
+    },
+    {
+      "source": "/decisions/7",
+      "status": "linked",
+      "taskId": "WRECK-T6",
+      "proof": "unit test: WRECK-T6: a missing phone or live-route receipt cannot read as verified"
+    },
+    {
+      "source": "/decisions/8",
+      "status": "linked",
+      "taskId": "WRECK-T2",
+      "proof": "unit test: tests/unit/lifecycle.test.ts"
+    }
+  ]
+}
