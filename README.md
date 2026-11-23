@@ -11,3 +11,5 @@ The product roadmap is Central Park solo combat, progression, curated and search
 ## How plans land
 
 A plan requested for this product in Remudero Console opens its pull request in this repository, under `plan/`. It counts only after that pull request's own Remudero review passes and it merges. Core records a refused request against the commit it read and does not retry it at that commit.
+
+The plan records are in `plan/tasks.d/`, one file per task, and `plan/roadmap.md` keeps the reserved later work. A task is ready to build only when its own record says so.
