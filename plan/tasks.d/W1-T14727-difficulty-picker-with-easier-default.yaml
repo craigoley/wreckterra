@@ -1,0 +1,83 @@
+- id: W1-T14727
+  title: Add Easy, Normal and Hard difficulty picked on the start screen, with Easy as the default and Normal kept as today's bots
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: architect
+  files:
+    - src/sim/difficulty.ts
+    - src/sim/bots.ts
+    - src/sim/combat.ts
+    - src/sim/contracts.ts
+    - src/ui/StartScreen.tsx
+    - src/App.tsx
+    - src/styles.css
+    - tests/unit/difficulty.test.ts
+    - tests/unit/difficulty-picker.test.tsx
+    - tests/unit/start-screen.test.tsx
+    - tests/unit/city-combat.test.ts
+  status: queued
+  attempts: 0
+  rationale: |
+    Operator direction 2026-11-24T19:14:58Z, repeated word for word at 19:16:39Z (console:repository-steer); one task covers both: "Wreckterra needs difficulty levels: the enemies are too hard right now. Add a difficulty picker on the start screen, with an easier default than today and a harder option."
+    Settled by lookup: is this already filed or decided? -> no. No task, roadmap entry or source mentions difficulty (grep of plan/ and src/); WRECK-T12/T13 set the bot rules and WRECK-T15 the start screen, and none of them has a difficulty level.
+    Settled by lookup: where does enemy strength live today? -> module constants: BOT_DAMAGE_SCALE 0.45 and BOT_SPREAD 0.045 in src/sim/combat.ts; BOT_GRACE_TICKS 240, GUN_ALIGNMENT 0.14 and the 0.05 missile chance per think in src/sim/bots.ts. There is no per-match knob (src/sim/combat.ts CombatOptions has only seed, playerVehicle and bots).
+    Settled by lookup: does the start screen exist to put the picker on? -> yes. src/ui/StartScreen.tsx (WRECK-T15, its tests in tests/unit/start-screen.test.tsx) owns useStartFlow and the Play button, and src/App.tsx creates the match with createCityMatch(city, { seed, playerVehicle }). So this depends on no open task.
+    Settled by lookup: should Easy use fewer bots? -> no. The brief's First release decision fixes four bots, so every level keeps four and changes only how hard they hit, aim and press.
+    Settled by lookup: does the rest of the direction (live OSM cities, a map place picker, Neon Drift controls) need new work? -> no. It is already covered by WRECK-T14 (live tiles), WRECK-T15 (start screen with world map) and WRECK-T16 (Neon Drift controls).
+    Sizing (Rule 19 merits test): risk high, band_meaning span. The acceptance is one cross-file invariant that cannot be met piecewise: a level picked on the start screen (StartScreen.tsx) must travel through App.tsx into createMatch (combat.ts, contracts.ts) and change bot behaviour (bots.ts) by rules from difficulty.ts, while Normal still replays today's matches. A test for "pick Hard, press Play, a still player is wrecked sooner" needs all of those files together. This follows the sibling WRECK-T13 to WRECK-T16 tasks, which are risk high with span bands.
+    Proof form: like WRECK-T13 to WRECK-T16, the proofs name test titles, because the wreckterra suites live under tests/unit/, a root the plan's unit-test dialect does not declare. Every test this task adds starts its title with "W1-T14727: ", and the criteria below quote those titles exactly.
+  design: |
+    INVARIANT normal-is-today: Normal is today's bot rules, value for value, so a seeded match on Normal replays as it does now. Omitting `difficulty` from CombatOptions means Normal, so existing seeded tests and replays do not change. Only the start screen defaults to Easy.
+    INVARIANT driving-unchanged: difficulty changes how bots fight (damage, spread, grace, aim cone, missile rate), never how they drive or route, and never the player's car, weapons, pickups, the five-minute limit or the four-bot count. WRECK-T13's street-keeping bound (at least 90% of sampled ticks) holds on every level.
+    INVARIANT menus-start-play (WRECK-T15) still holds: choosing a difficulty never starts or restarts a match.
+    1. src/sim/difficulty.ts exports `type Difficulty = "easy" | "normal" | "hard"`, DIFFICULTIES (in that order, each with a label and a one-line description), DEFAULT_MENU_DIFFICULTY = "easy" and difficultyRules(level). The rules are botDamageScale, botSpread, botGraceTicks, botGunAlignment and botMissileChance. All the tuning lives in this file.
+       Starting values: normal = { 0.45, 0.045, 240, 0.14, 0.05 } (today's constants, moved here); easy = { 0.28, 0.075, 420, 0.09, 0.02 }; hard = { 0.62, 0.032, 150, 0.18, 0.08 }. The values may be retuned as long as the ordering tests below pass.
+    2. src/sim/combat.ts: CombatOptions gains `difficulty?: Difficulty`. createMatch reads difficultyRules( once and applies botDamageScale and botSpread to bot gunfire and missiles, in place of BOT_DAMAGE_SCALE and BOT_SPREAD. It passes the bot rules to createBotBrain(seed, rules), and restart keeps the level. The snapshot's match state (src/sim/contracts.ts MatchState) gains an additive `difficulty` field, so a snapshot names the rules it ran under. CONTRACT_VERSION stays the same.
+    3. src/sim/bots.ts: createBotBrain takes the bot rules and uses botGraceTicks, botGunAlignment and botMissileChance in place of BOT_GRACE_TICKS, GUN_ALIGNMENT and the literal 0.05. Steering, routing, cover and unsticking code is untouched.
+    4. src/ui/StartScreen.tsx: a DifficultyPicker (a labelled radio group "Difficulty" with Easy, Normal and Hard plus each one's description) sits beside the car choice. useStartFlow exposes `difficulty` and `setDifficulty`. It starts from local storage key `wreckterra.difficulty.v1`, and a missing or unreadable value falls back to Easy. A change is saved there.
+    5. src/App.tsx passes flow.difficulty to createCityMatch through CombatSurface. The results dialog names the level played, Restart keeps it, and Change place returns to the start screen with it still selected.
+    6. tests/unit/difficulty.test.ts (vitest default timeout) holds these tests, titled exactly:
+       "W1-T14727: normal difficulty equals today's bot rules" checks that Normal's rules equal today's constants and that omitting difficulty gives Normal.
+       "W1-T14727: difficulty levels are strictly ordered" checks that damage and missile chance rise strictly, and spread and grace fall strictly, from Easy to Normal to Hard.
+       "W1-T14727: a still player survives longer on easier levels" checks, over at least three seeds in a city match where the player sits still, that the mean tick at which the player is wrecked (or the time limit) is strictly later on Easy than Normal, and on Normal than Hard.
+       "W1-T14727: bots keep to the streets on every difficulty" checks that bots stay on the street at least 90% of sampled ticks on Easy and on Hard.
+       "W1-T14727: a snapshot carries its difficulty and restart keeps it".
+       tests/unit/difficulty-picker.test.tsx holds:
+       "W1-T14727: the start screen defaults to easy" checks that a fresh start screen selects Easy and that unreadable storage falls back to Easy.
+       "W1-T14727: the picked difficulty reaches the match" checks that choosing Hard and pressing Play creates the match on Hard, and that choosing a level never starts a match.
+  acceptance:
+    - claim: "invariant:normal-is-today — Normal equals today's bot rules, so omitting difficulty replays today's matches"
+      proof: "unit test: W1-T14727: normal difficulty equals today's bot rules"
+    - claim: "Easy, Normal and Hard are strictly ordered in damage, missile chance, spread and grace"
+      proof: "unit test: W1-T14727: difficulty levels are strictly ordered"
+    - claim: "A still player survives longer on Easy than Normal, and on Normal than Hard"
+      proof: "unit test: W1-T14727: a still player survives longer on easier levels"
+    - claim: "invariant:driving-unchanged — bots keep to the streets at least 90% of the time on every level"
+      proof: "unit test: W1-T14727: bots keep to the streets on every difficulty"
+    - claim: "A snapshot names its difficulty and restart keeps the level"
+      proof: "unit test: W1-T14727: a snapshot carries its difficulty and restart keeps it"
+    - claim: "The start screen defaults to Easy, including when storage is unreadable"
+      proof: "unit test: W1-T14727: the start screen defaults to easy"
+    - claim: "invariant:menus-start-play — the chosen level reaches the match and the picker never starts one"
+      proof: "unit test: W1-T14727: the picked difficulty reaches the match"
+    - claim: "The combat match reads its bot rules from the difficulty table"
+      proof: "grep: difficultyRules( in src/sim/combat.ts"
+    - claim: "The start screen renders the difficulty picker"
+      proof: "grep: DifficultyPicker in src/ui/StartScreen.tsx"
+    - claim: "The app hands the picked difficulty to the match"
+      proof: "grep: flow.difficulty in src/App.tsx"
+  falsifier: |
+    These edits should each fail a test:
+    - Keep BOT_DAMAGE_SCALE hard-wired in combat.ts and survival on Easy equals Normal, failing criterion 3.
+    - Default the picker to Normal and criterion 6 fails.
+    - Let a radio change call flow.play and criterion 7 fails.
+    - Retune Normal and criterion 1 fails.
+  note: Filed by the architect (PLAN create) from the 2026-11-24 19:14 and 19:16 UTC operator steers. It makes no existing task obsolete.
