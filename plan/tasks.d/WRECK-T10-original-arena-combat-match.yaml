@@ -1,4 +1,4 @@
-- id: WRECK-T7
+- id: WRECK-T10
   title: Play a short original-arena combat match with weapons, pickups and four bots that fight back, won or lost
   repo: wreckterra
   depends_on: []
@@ -148,18 +148,18 @@
     Task origin: product-plan#prd_ca604fb69b319193b4d5128b6c858d4b/pplan-936136b66a775defaf206ec2
   acceptance:
     - claim: A match starts in the original arena with the player and four bots, each with health and weapons
-      proof: "unit test: WRECK-T7: a match starts with the player and four armed bots in the arena"
+      proof: "unit test: WRECK-T10: a match starts with the player and four armed bots in the arena"
     - claim: The machine gun and the lock-on missile deal damage, missiles use ammo, and each vehicle's special works
-      proof: "unit test: WRECK-T7: weapons deal damage and missiles spend ammo"
+      proof: "unit test: WRECK-T10: weapons deal damage and missiles spend ammo"
     - claim: Bots chase, fire on and damage the player within the first 30 seconds of a seeded match
-      proof: "unit test: WRECK-T7: bots damage the player within thirty seconds"
+      proof: "unit test: WRECK-T10: bots damage the player within thirty seconds"
     - claim: Health and ammo pickups restore their stat and respawn
-      proof: "unit test: WRECK-T7: pickups restore and respawn"
+      proof: "unit test: WRECK-T10: pickups restore and respawn"
     - claim: The match ends in a win when the player is the last car running, and in a loss when the player is wrecked, within 5 minutes
-      proof: "unit test: WRECK-T7: a match ends in a win or a loss within five minutes"
+      proof: "unit test: WRECK-T10: a match ends in a win or a loss within five minutes"
     - claim: The app starts the match through the combat simulation
       proof: "grep: createCombatMatch( in src/App.tsx"
     - claim: Restart begins a fresh match from the same seed
-      proof: "unit test: WRECK-T7: restart begins a fresh match"
+      proof: "unit test: WRECK-T10: restart begins a fresh match"
   falsifier: Remove the bots' firing and criterion 3 fails; remove the end condition and criterion 5 fails.
   note: Filed by the operator session 2026-11-24 as the re-plan's first build. WRECK-T2 and WRECK-T3 now depend on it.
