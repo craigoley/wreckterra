@@ -1,0 +1,165 @@
+- id: WRECK-T10
+  title: Play a short original-arena combat match with weapons, pickups and four bots that fight back, won or lost
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/App.tsx
+    - src/styles.css
+    - src/game/VehicleScene.tsx
+    - src/game/ArenaScene.tsx
+    - src/game/Hud.tsx
+    - src/game/TouchControls.tsx
+    - src/sim/contracts.ts
+    - src/sim/world.ts
+    - src/sim/combat.ts
+    - src/sim/bots.ts
+    - src/sim/arena.ts
+    - tests/unit/combat-slice.test.ts
+  status: queued
+  attempts: 0
+  rationale: "Operator feedback 2026-11-24 on the first build (WRECK-T1): \"In no way does what this is resemble\" the vehicular-combat game intended; \"It's an mvp, it just didn't match my intent\". The plan put combat in WRECK-T4 after controls and the map, so the first playable build had nothing to fight. Operator 03:52Z: go with the recommendation to re-plan around a combat slice first in a simple original arena."
+  design: |
+    Build the first playable slice of the core experience: one short vehicular-combat match in a small original arena, on top of WRECK-T1's fixed-tick simulation. Original identity only: our own vehicles, names and arena, inspired by broad vehicular-combat roles, copying no existing game's characters, art, levels or text.
+    The slice has: an enclosed original arena (a walled lot with ramps, cover blocks and two pickup pads); three original vehicles with distinct roles (light and fast, balanced, heavy and tough) each with health; a forward machine gun, a lock-on missile with limited ammo, and one special per vehicle; health and ammo pickups that respawn; four bots that chase, strafe, fire, take cover and grab pickups; damage feedback (hit flashes, sparks, smoke at low health, an explosion and wreck on death); a match timer of at most 5 minutes; a win when the player is the last car running and a lose when the player is wrecked; and a restart button. Desktop keyboard and basic on-screen touch controls both drive and fire. Combat rules live in the simulation (deterministic, seeded) so the bots and outcomes are testable. The app starts every match through createCombatMatch( from src/sim/combat.ts, called in src/App.tsx.
+    The feel bar for this and every later build is plan/feel-checklist.md: the build states in its PR how it meets each line.
+    NO-INVARIANTS: only WRECK-T1's driving foundation exists; no prior combat behavior has to be kept.
+
+    Approved product brief:
+    {
+      "decisions": [
+        {
+          "key": "Original identity",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use original vehicles, drivers, names, visual identities and lore inspired by broad vehicular-combat roles. Preserve the desired combat appeal without copying distinctive Twisted Metal characters, assets or text."
+        },
+        {
+          "key": "First release",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Solo first with training and short skirmishes, three original vehicles and four bots. Keep input commands, events, snapshots and authority boundaries versioned for later online multiplayer."
+        },
+        {
+          "key": "Mobile priority",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Build a React browser game, without a React Native version. Prioritize touch play and mobile performance on iPhone Safari and Android Chrome while supporting desktop keyboard and gamepad. The operator has an iPhone for the first actual device check; record Android emulation and physical Android evidence separately."
+        },
+        {
+          "key": "Real places",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Start with the Bethesda Terrace area of Central Park using the pinned OpenStreetMap fixture. Preserve recognizable roads, water, bridges and landmarks, with explicit driveability adaptations."
+        },
+        {
+          "key": "Geographic expansion",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "After the curated prototype, support selecting or searching arbitrary locations through a map with a governed cached geography compiler. Retain World Drive as a later bounded streaming mode."
+        },
+        {
+          "key": "Progression",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use useful early access to modes and locations, cosmetics and balanced vehicle sidegrades. Do not make players grind to access their favorite geographic place."
+        },
+        {
+          "key": "Existing setup",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use React and the existing Remudero, Vercel and OleyArcade setup. Additional services, purchases, DNS changes or higher spending limits require their own authorization."
+        },
+        {
+          "key": "Console lifecycle",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use Console to capture and resume the product, adopt the existing public craigoley/wreckterra repository, verify onboarding, file a versioned plan and admit the first gameplay build. Preserve separate source, tests, review, merge, deployment and device evidence."
+        },
+        {
+          "key": "Mobile resilience and measured quality",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "For the solo web prototype, pause simulation and audio when the page is hidden, clear held controls on cancellation or layout changes, and resume from an explicit tap without a catch-up burst. Recover WebGL through the supported renderer path from the same versioned match state; show a recoverable fallback when unavailable. Bound render resolution and adapt visual quality from sustained measured frame times without changing physics. Record real device/browser performance and a physical iPhone playthrough separately from browser emulation. Online authority and reconnect behavior remain later multiplayer work."
+        }
+      ],
+      "idea": "Wreckterra is a mobile-first browser vehicular-combat game in OleyArcade. Drive original combat vehicles through recognizable real-world locations compiled from OpenStreetMap, starting with a bounded Central Park arena. Build solo combat first, with foundations for later online multiplayer, map-selected arenas and streamed World Drive.",
+      "name": "Wreckterra",
+      "objective": "Deliver a playable mobile-first Bethesda Terrace/Central Park training and skirmish prototype through the Remudero Console new-product flow, using the existing public repository and existing resource limits.",
+      "portfolio": "OleyArcade",
+      "research": [
+        {
+          "label": "OpenStreetMap attribution and license",
+          "url": "https://www.openstreetmap.org/copyright"
+        },
+        {
+          "label": "R3F performance guidance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/pitfalls"
+        },
+        {
+          "label": "Rapier determinism boundary",
+          "url": "https://rapier.rs/docs/user_guides/javascript/determinism/"
+        },
+        {
+          "label": "R3F scaling and rendering performance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/scaling-performance"
+        },
+        {
+          "label": "MDN multi-pointer input and pointer capture",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+        },
+        {
+          "label": "MDN mobile page visibility and lifecycle",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
+        },
+        {
+          "label": "MDN bounded WebGL rendering practices",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices"
+        },
+        {
+          "label": "MDN WebGL context restoration",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/webglcontextrestored_event"
+        }
+      ],
+      "resourceEnvelope": {
+        "budgetUsd": 30,
+        "existingSetupOnly": true,
+        "maxConcurrentBuilds": 1
+      }
+    }
+
+    Task origin: product-plan#prd_ca604fb69b319193b4d5128b6c858d4b/pplan-936136b66a775defaf206ec2
+  acceptance:
+    - claim: A match starts in the original arena with the player and four bots, each with health and weapons
+      proof: "unit test: WRECK-T10: a match starts with the player and four armed bots in the arena"
+    - claim: The machine gun and the lock-on missile deal damage, missiles use ammo, and each vehicle's special works
+      proof: "unit test: WRECK-T10: weapons deal damage and missiles spend ammo"
+    - claim: Bots chase, fire on and damage the player within the first 30 seconds of a seeded match
+      proof: "unit test: WRECK-T10: bots damage the player within thirty seconds"
+    - claim: Health and ammo pickups restore their stat and respawn
+      proof: "unit test: WRECK-T10: pickups restore and respawn"
+    - claim: The match ends in a win when the player is the last car running, and in a loss when the player is wrecked, within 5 minutes
+      proof: "unit test: WRECK-T10: a match ends in a win or a loss within five minutes"
+    - claim: The app starts the match through the combat simulation
+      proof: "grep: createCombatMatch( in src/App.tsx"
+    - claim: Restart begins a fresh match from the same seed
+      proof: "unit test: WRECK-T10: restart begins a fresh match"
+  falsifier: Remove the bots' firing and criterion 3 fails; remove the end condition and criterion 5 fails.
+  note: Filed by the operator session 2026-11-24 as the re-plan's first build. WRECK-T2 and WRECK-T3 now depend on it.

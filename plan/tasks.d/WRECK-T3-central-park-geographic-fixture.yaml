@@ -2,7 +2,7 @@
   title: Compile a recognizable bounded Central Park sector from pinned OSM data
   repo: wreckterra
   depends_on:
-    - WRECK-T1
+    - WRECK-T10
   priority: 1.1
   type: implement
   verify: auto
