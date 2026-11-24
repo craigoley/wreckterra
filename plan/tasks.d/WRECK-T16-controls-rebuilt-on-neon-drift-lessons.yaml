@@ -1,0 +1,47 @@
+- id: WRECK-T16
+  title: Rebuild the controls on Neon Drift's lessons, with one input intent for every device, drag-to-steer touch, big thumb weapons and a tuned chase camera
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/input/intent.ts
+    - src/input/controls.ts
+    - src/input/tuning.ts
+    - src/game/TouchControls.tsx
+    - src/game/ChaseCamera.tsx
+    - src/game/VehicleScene.tsx
+    - src/sim/world.ts
+    - src/styles.css
+    - tests/unit/controls.test.ts
+    - tests/e2e/touch-controls.spec.ts
+  status: queued
+  attempts: 0
+  rationale: "Operator 2026-11-24T15:54Z: \"have better controls ... Take a look at everything we've done for neon drift and apply lessons, controls, and improvements from it.\" Today touch play is six separate hold buttons (Left, Right, Gas, Reverse, Brake and weapons) below the view. Neon Drift (craigoley/neon-drift, src/input/Controls.ts, src/game/Input.ts, CLAUDE.md) uses one device-agnostic input intent, drag-to-steer from the touch origin with a deadzone and a linear rescale to full lock, rising-edge one-shot actions, menu-driven start, a smoothed follow camera with roll, and all tuning in one constants file."
+  design: |
+    INVARIANT one-intent: keyboard, gamepad and touch all produce the same InputIntent {steer -1..1, throttle -1..1, brake, fire, missile, special, handbrake}; the simulation reads only the intent, never a device.
+    1. src/input/intent.ts defines InputIntent; one-shot actions (missile, special) are latches set on the rising edge and cleared by the simulation when it acts, so a held button or several sub-steps spend one shot.
+    2. src/input/controls.ts adapts keyboard (WASD and arrows, Space fire, Shift handbrake, Q missile, E special), the Gamepad API (left stick steer with a radial deadzone, triggers throttle and brake, face buttons weapons) and touch.
+    3. Touch (src/game/TouchControls.tsx): the left half of the view is a steering pad: a drag from the touch origin maps linearly to steer from the deadzone edge to full lock at maxDragPx (no jump at the boundary); throttle is on by default and the pad's vertical drag past a threshold reverses; the right side has large fire (hold), missile and special buttons sized for thumbs, with vibration on hits where the device supports it. Multi-touch: steering and firing at once. Controls clear on touchcancel, page hide and layout change.
+    4. src/input/tuning.ts holds every control and camera constant (deadzonePx, maxDragPx, steer response, camera follow lerp, roll at lateral speed, field of view by speed); no magic numbers elsewhere.
+    5. ChaseCamera follows with per-second smoothing, rolls slightly with lateral speed and widens field of view with speed.
+  acceptance:
+    - claim: "invariant:one-intent — keyboard, gamepad and touch produce the same intent for the same command"
+      proof: "unit test: WRECK-T16: every device produces the same intent"
+    - claim: "Touch steering ramps continuously from zero at the deadzone edge to full lock at maxDragPx"
+      proof: "unit test: WRECK-T16: touch steer ramps from the deadzone edge to full lock"
+    - claim: "A held missile button fires exactly one missile per press"
+      proof: "unit test: WRECK-T16: a held missile button fires once per press"
+    - claim: "Steering and firing work at the same time on a touch screen"
+      proof: "unit test: WRECK-T16: steering and firing work together on touch"
+    - claim: "The game reads one intent from the controls adapter"
+      proof: "grep: createControls( in src/game/VehicleScene.tsx"
+  falsifier: Read keys directly in the simulation and criterion 1 fails; map drag to steer with a step at the deadzone and criterion 2 fails; fire a missile per frame while held and criterion 3 fails.
+  note: Filed by the operator session 2026-11-24 from the Neon Drift study.

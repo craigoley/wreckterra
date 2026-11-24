@@ -1,0 +1,48 @@
+- id: WRECK-T15
+  title: Open on a start screen where you pick any real place on a world map, choose your car and start a match there
+  repo: wreckterra
+  depends_on:
+    - WRECK-T14
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - package.json
+    - package-lock.json
+    - src/ui/StartScreen.tsx
+    - src/ui/place-search.ts
+    - src/App.tsx
+    - src/styles.css
+    - tests/unit/start-screen.test.tsx
+    - tests/e2e/start-screen.spec.ts
+  status: queued
+  attempts: 0
+  rationale: "Operator 2026-11-24T15:54Z: \"You need to give it a start screen ... The start screen should allow you to find a location on a map to play in.\" Today the page opens straight into one fixed Midtown match."
+  design: |
+    INVARIANT menus-start-play: a match starts only from the start screen's Play button (or restart on the results screen); taps on the map or the game view never start or restart a match (the Neon Drift shell rule).
+    1. src/ui/StartScreen.tsx is the first screen, driven from src/App.tsx by useStartFlow( exported from it: the Wreckterra title, Play, a place chooser, the three cars with their roles, and a short controls card that matches the device (touch or keyboard and gamepad, decided once at load from pointer:coarse).
+    2. The place picker inside src/ui/StartScreen.tsx shows a MapLibre GL map with OpenFreeMap's liberty style (no API key). The player pans and zooms anywhere and taps to drop a pin; a small preview square shows the play area. Suggested places (Midtown Manhattan, and three more dense downtowns) and the last five played places (local storage) are one tap away.
+    3. src/ui/place-search.ts (created in src/App.tsx with createPlaceSearch( and passed to the start screen) searches by name only when the player submits (no autocomplete), through Nominatim at most once per second, and shows its attribution.
+    4. Play builds the city through WRECK-T14's loadLiveCity with a loading view inside src/ui/StartScreen.tsx showing tile and build progress; a refusal shows its reason and offers another place or the pinned Midtown.
+    5. The results screen offers Restart (same place) and Change place (back to the start screen).
+  acceptance:
+    - claim: "invariant:menus-start-play — the page opens on the start screen and only Play starts a match"
+      proof: "unit test: WRECK-T15: only the Play button starts a match"
+    - claim: "Picking a point on the map and pressing Play loads a city for that point"
+      proof: "unit test: WRECK-T15: a picked point is passed to the live city loader"
+    - claim: "Search runs only on submit and at most once per second"
+      proof: "unit test: WRECK-T15: place search runs only on submit and at most once a second"
+    - claim: "A refused place shows its reason and offers the pinned city"
+      proof: "unit test: WRECK-T15: a refused place shows its reason and offers Midtown"
+    - claim: "The app drives the start screen's flow"
+      proof: "grep: useStartFlow( in src/App.tsx"
+    - claim: "The app creates the place search the start screen uses"
+      proof: "grep: createPlaceSearch( in src/App.tsx"
+  falsifier: Start the match on load and criterion 1 fails; search on every keystroke and criterion 3 fails.
+  note: Filed by the operator session 2026-11-24.
