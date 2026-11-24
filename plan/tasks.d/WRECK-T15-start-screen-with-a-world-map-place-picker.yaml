@@ -21,6 +21,9 @@
     - src/styles.css
     - tests/unit/start-screen.test.tsx
     - tests/e2e/start-screen.spec.ts
+    - "tests/unit/city-combat.test.ts"
+    - "tests/unit/combat-slice.test.ts"
+    - "tests/unit/foundation.test.ts"
   status: queued
   attempts: 0
   rationale: "Operator 2026-11-24T15:54Z: \"You need to give it a start screen ... The start screen should allow you to find a location on a map to play in.\" Today the page opens straight into one fixed Midtown match."

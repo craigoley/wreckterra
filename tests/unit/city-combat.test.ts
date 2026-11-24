@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
 import { effectsFromEvents } from "../../src/game/CombatEffects";
 import type { Building, CityData, Spawn } from "../../src/maps/city-compiler";
 import { parseCity } from "../../src/maps/midtown";
+import type { LiveCityOutcome } from "../../src/maps/tile-city";
 import { createBotBrain, createStreetNav, type BotCommand } from "../../src/sim/bots";
 import {
   createCityMatch, GUN_DAMAGE, MATCH_TICKS, MISSILE_DAMAGE, MISSILE_START_AMMO, PICKUP_RESPAWN_TICKS, PLAYER_ID, SPECIAL_COOLDOWN_TICKS,
@@ -321,8 +322,12 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
     expect(effectsFromEvents([])).toEqual([]);
   });
 
-  it("WRECK-T12: the app runs the city match with a HUD", () => {
-    render(createElement(App));
+  it("WRECK-T12: the app runs the city match with a HUD", async () => {
+    // A match starts only from the start screen: press Play, then take the pinned Midtown the refusal offers.
+    const refuse = async (): Promise<LiveCityOutcome> => ({ ok: false, reason: "offline", fallback: "pinned-midtown", notes: [] });
+    render(createElement(App, { loadCity: refuse }));
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Play pinned Midtown" }));
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("100");
     expect(screen.getByText("Missiles 4/8")).toBeTruthy();
     expect(screen.getByText("Bots left 4/4")).toBeTruthy();

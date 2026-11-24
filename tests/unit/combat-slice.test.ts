@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
+import type { LiveCityOutcome } from "../../src/maps/tile-city";
 import { createBotBrain, type BotCommand } from "../../src/sim/bots";
 import {
   AMMO_PICKUP, createCombatMatch, MATCH_TICKS, MISSILE_START_AMMO, PICKUP_RESPAWN_TICKS, PLAYER_ID, SPECIAL_COOLDOWN_TICKS,
@@ -293,8 +294,15 @@ describe("WRECK-T10: original arena combat match", () => {
     expect(match.snapshot()).toEqual(twin.snapshot());
   });
 
-  it("WRECK-T10: the app runs the match with HUD, touch controls and a one-tap restart", () => {
-    render(createElement(App));
+  it("WRECK-T10: the app runs the match with HUD, touch controls and a one-tap restart", async () => {
+    // A match starts only from the start screen: press Play, then take the pinned Midtown the refusal offers.
+    const refuse = async (): Promise<LiveCityOutcome> => ({ ok: false, reason: "offline", fallback: "pinned-midtown", notes: [] });
+    const begin = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Play pinned Midtown" }));
+    };
+    render(createElement(App, { loadCity: refuse }));
+    await begin();
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("100");
     expect(screen.getByRole("group", { name: "Weapon controls" })).toBeTruthy();
     // WRECK-T16 replaced the hold buttons with a steering pad and three thumb weapons.
@@ -303,8 +311,11 @@ describe("WRECK-T10: original arena combat match", () => {
     expect(screen.getByText("Missiles 4/8")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("100");
-    // Choosing another vehicle starts the match with that vehicle.
+    // Choosing another vehicle on the start screen starts the match with that vehicle.
+    cleanup();
+    render(createElement(App, { loadCity: refuse }));
     fireEvent.click(screen.getByRole("button", { name: /Rivet/ }));
+    await begin();
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("150");
   });
 });
