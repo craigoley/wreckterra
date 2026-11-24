@@ -2,7 +2,7 @@
   title: Qualify and release the Central Park prototype with independent device and deployment receipts
   repo: wreckterra
   depends_on:
-    - WRECK-T4
+    - WRECK-T12
   priority: 1.1
   type: implement
   verify: auto

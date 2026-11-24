@@ -2,7 +2,7 @@
   title: Make driving feel good on touch phones with safe lifecycle handling
   repo: wreckterra
   depends_on:
-    - WRECK-T10
+    - WRECK-T12
   priority: 1.1
   type: implement
   verify: auto

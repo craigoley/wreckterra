@@ -1,0 +1,168 @@
+- id: WRECK-T11
+  title: Drive an original combat car in third person through real Manhattan streets south of Central Park, built in 3D from a pinned OpenStreetMap snapshot with extruded, textured buildings
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - package.json
+    - package-lock.json
+    - scripts/acquire-midtown.mjs
+    - src/maps/city-compiler.ts
+    - src/maps/midtown.ts
+    - public/maps/midtown/source.osm.json
+    - public/maps/midtown/city.json
+    - public/maps/midtown/NOTICE.txt
+    - src/game/CityScene.tsx
+    - src/game/cityMaterials.ts
+    - src/game/ChaseCamera.tsx
+    - src/game/VehicleScene.tsx
+    - src/App.tsx
+    - tests/unit/city-compiler.test.ts
+  status: queued
+  attempts: 0
+  rationale: "Operator 2026-11-24T12:36Z on the live WRECK-T10 arena: it \"still looks nothing like\" the intended game; the point is to \"drive a car around with weapons and fight other cars in real cities with realistic visuals of the city\". The flat arena is replaced by a real-city slice."
+  design: |
+    Replace the flat top-down arena with a real city in 3D. The scene is a bounded district of real Manhattan streets on the south edge of Central Park (about Central Park South to West 57th Street, Sixth Avenue to Fifth Avenue, with Grand Army Plaza and the park edge), compiled at developer time from a pinned OpenStreetMap snapshot (Overpass extract saved in the repo with its URL, date and SHA-256; no live Overpass, Nominatim or tile calls in production). Original identity only: our own cars, names and art; nothing copied from an existing game.
+    1. scripts/acquire-midtown.mjs saves the snapshot; src/maps/city-compiler.ts turns it into public/maps/midtown/city.json: building footprints extruded to a height from height, then building:levels times 3.2 m, then a labelled default; road ribbons with widths from highway class and lanes; sidewalks; the park edge as grass with trees; local metric coordinates from a stable origin; a drivable street graph; and clear spawn points on roads. The compiler is deterministic (same snapshot, same bytes out) and rejects non-finite or self-intersecting geometry.
+    2. Rendering uses three.js through @react-three/fiber. src/game/CityScene.tsx draws the extruded buildings with procedural facade materials (window grids, ground-floor storefront bands, roof caps, varied by building id), asphalt with lane markings, curbs and sidewalks, street lights and trees, sky and fog, and soft shadows, merged into few draw calls. src/game/ChaseCamera.tsx follows the player car from behind and above with smoothing. Visual quality adapts to measured frame time (resolution scale and shadow quality) without touching the simulation.
+    3. The player drives one original combat car (a 3D model built from primitives in our own style) on WRECK-T1's fixed-tick simulation, at arcade speed, with collisions against building footprints and curbs. Keyboard, gamepad and the existing touch controls drive it. The app loads the city through loadCity( from src/maps/midtown.ts, called in src/game/VehicleScene.tsx.
+    4. The page shows visible OSM attribution (ODbL) and NOTICE.txt carries the source and licence.
+    The feel bar is plan/feel-checklist.md; the PR states how it meets lines 2, 7 and 8 and says why the combat lines wait for WRECK-T12.
+    NO-INVARIANTS: the WRECK-T10 arena is replaced, so no prior map or camera behavior has to be kept; WRECK-T10's combat simulation stays for WRECK-T12.
+
+    Approved product brief:
+    {
+      "decisions": [
+        {
+          "key": "Original identity",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use original vehicles, drivers, names, visual identities and lore inspired by broad vehicular-combat roles. Preserve the desired combat appeal without copying distinctive Twisted Metal characters, assets or text."
+        },
+        {
+          "key": "First release",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Solo first with training and short skirmishes, three original vehicles and four bots. Keep input commands, events, snapshots and authority boundaries versioned for later online multiplayer."
+        },
+        {
+          "key": "Mobile priority",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Build a React browser game, without a React Native version. Prioritize touch play and mobile performance on iPhone Safari and Android Chrome while supporting desktop keyboard and gamepad. The operator has an iPhone for the first actual device check; record Android emulation and physical Android evidence separately."
+        },
+        {
+          "key": "Real places",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Start with the Bethesda Terrace area of Central Park using the pinned OpenStreetMap fixture. Preserve recognizable roads, water, bridges and landmarks, with explicit driveability adaptations."
+        },
+        {
+          "key": "Geographic expansion",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "After the curated prototype, support selecting or searching arbitrary locations through a map with a governed cached geography compiler. Retain World Drive as a later bounded streaming mode."
+        },
+        {
+          "key": "Progression",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use useful early access to modes and locations, cosmetics and balanced vehicle sidegrades. Do not make players grind to access their favorite geographic place."
+        },
+        {
+          "key": "Existing setup",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use React and the existing Remudero, Vercel and OleyArcade setup. Additional services, purchases, DNS changes or higher spending limits require their own authorization."
+        },
+        {
+          "key": "Console lifecycle",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "Use Console to capture and resume the product, adopt the existing public craigoley/wreckterra repository, verify onboarding, file a versioned plan and admit the first gameplay build. Preserve separate source, tests, review, merge, deployment and device evidence."
+        },
+        {
+          "key": "Mobile resilience and measured quality",
+          "provenance": {
+            "kind": "operator"
+          },
+          "value": "For the solo web prototype, pause simulation and audio when the page is hidden, clear held controls on cancellation or layout changes, and resume from an explicit tap without a catch-up burst. Recover WebGL through the supported renderer path from the same versioned match state; show a recoverable fallback when unavailable. Bound render resolution and adapt visual quality from sustained measured frame times without changing physics. Record real device/browser performance and a physical iPhone playthrough separately from browser emulation. Online authority and reconnect behavior remain later multiplayer work."
+        }
+      ],
+      "idea": "Wreckterra is a mobile-first browser vehicular-combat game in OleyArcade. Drive original combat vehicles through recognizable real-world locations compiled from OpenStreetMap, starting with a bounded Central Park arena. Build solo combat first, with foundations for later online multiplayer, map-selected arenas and streamed World Drive.",
+      "name": "Wreckterra",
+      "objective": "Deliver a playable mobile-first Bethesda Terrace/Central Park training and skirmish prototype through the Remudero Console new-product flow, using the existing public repository and existing resource limits.",
+      "portfolio": "OleyArcade",
+      "research": [
+        {
+          "label": "OpenStreetMap attribution and license",
+          "url": "https://www.openstreetmap.org/copyright"
+        },
+        {
+          "label": "R3F performance guidance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/pitfalls"
+        },
+        {
+          "label": "Rapier determinism boundary",
+          "url": "https://rapier.rs/docs/user_guides/javascript/determinism/"
+        },
+        {
+          "label": "R3F scaling and rendering performance",
+          "url": "https://r3f.docs.pmnd.rs/advanced/scaling-performance"
+        },
+        {
+          "label": "MDN multi-pointer input and pointer capture",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+        },
+        {
+          "label": "MDN mobile page visibility and lifecycle",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
+        },
+        {
+          "label": "MDN bounded WebGL rendering practices",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices"
+        },
+        {
+          "label": "MDN WebGL context restoration",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/webglcontextrestored_event"
+        }
+      ],
+      "resourceEnvelope": {
+        "budgetUsd": 30,
+        "existingSetupOnly": true,
+        "maxConcurrentBuilds": 1
+      }
+    }
+
+    Task origin: product-plan#prd_ca604fb69b319193b4d5128b6c858d4b/pplan-936136b66a775defaf206ec2
+  acceptance:
+    - claim: The compiler turns the pinned snapshot into the same city file every time, with buildings, roads, sidewalks, a street graph and road spawns
+      proof: "unit test: WRECK-T11: the city compiler is deterministic and yields buildings, roads and road spawns"
+    - claim: Building heights come from height, then building:levels, then a labelled default
+      proof: "unit test: WRECK-T11: building heights come from height then levels then a labelled default"
+    - claim: Non-finite or self-intersecting geometry is rejected
+      proof: "unit test: WRECK-T11: bad geometry is rejected"
+    - claim: The car collides with building footprints and cannot drive through them
+      proof: "unit test: WRECK-T11: the car cannot drive through a building"
+    - claim: The game loads the compiled city in the vehicle scene
+      proof: "grep: loadCity( in src/game/VehicleScene.tsx"
+    - claim: The page shows OpenStreetMap attribution
+      proof: "grep: OpenStreetMap in src/game/CityScene.tsx"
+  falsifier: Remove the levels fallback and criterion 2 fails; skip footprint collision and criterion 4 fails; load the arena instead of the city and criterion 5 fails.
+  note: Filed by the operator session 2026-11-24 after the operator's real-city direction. WRECK-T12 puts combat into this city.

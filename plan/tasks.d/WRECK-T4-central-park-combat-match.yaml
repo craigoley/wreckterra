@@ -24,7 +24,9 @@
     - src/styles.css
     - tests/unit/combat.test.ts
     - tests/e2e/match.spec.ts
-  status: queued
+  status: blocked
+  retirement: closed
+  superseded_by: WRECK-T12
   dispatch_hold: true
   attempts: 0
   rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
