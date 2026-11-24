@@ -19,6 +19,8 @@ import {
 } from "../sim/contracts";
 import type { LatLon } from "./city-cache";
 import { CITY_VERSION, closestOnSegment, pointInRing, signedArea, type CityData, type Vec2 } from "./city-compiler";
+import type { CityGeometry } from "../sim/world";
+import { createSpatialIndex, type SpatialIndex } from "./spatial-index";
 import { loadLiveCity, type LiveCityDeps } from "./tile-city";
 
 /** The compiled city is a static file served from our own origin: production never calls Overpass. */
@@ -121,6 +123,157 @@ export function circleVsFootprint(x: number, z: number, radius: number, ring: re
   return { nx: (x - bestPoint[0]) / best, nz: (z - bestPoint[1]) / best, depth: radius - best };
 }
 
+/* ---------------------------------------------------------------- the indexed city */
+
+/** Cell edge of the collision grids, metres: a block or two, so a query touches a few buildings. */
+const INDEX_CELL_M = 16;
+/** A street counts as carriageway this far past its half width (generous at the kerb). */
+const KERB_M = 0.4;
+
+/** Distance along a unit ray to one polygon edge, or Infinity when the ray misses it. */
+function rayEdge(ox: number, oz: number, dx: number, dz: number, a: Vec2, b: Vec2): number {
+  const ex = b[0] - a[0];
+  const ez = b[1] - a[1];
+  const denominator = dx * ez - dz * ex;
+  if (Math.abs(denominator) < 1e-12) return Infinity;
+  const ax = a[0] - ox;
+  const az = a[1] - oz;
+  const t = (ax * ez - az * ex) / denominator;
+  const u = (ax * dz - az * dx) / denominator;
+  return t >= 0 && u >= 0 && u <= 1 ? t : Infinity;
+}
+
+/** The city geometry plus a ray test that gives up past a distance, which is all a sight line needs. */
+export interface IndexedGeometry extends CityGeometry {
+  /** Like `rayCover`, but anything farther than `limit` along the ray is ignored (Infinity when none is nearer). */
+  rayCoverWithin(ox: number, oz: number, dx: number, dz: number, limit: number): number;
+}
+
+interface Footprint { ring: readonly Vec2[]; minX: number; maxX: number; minZ: number; maxZ: number }
+interface RoadSegment { a: Vec2; b: Vec2; half: number }
+
+/**
+ * A city's buildings and street segments filed in uniform grids, built once per city. Car collision,
+ * the on-road test, line of sight and bot steering query only the cells they touch, and answer
+ * exactly what a scan of every building and segment would (contacts come back in building order).
+ */
+export function createIndexedGeometry(city: CityData): IndexedGeometry {
+  const footprints: Footprint[] = city.buildings.map((b) => {
+    const xs = b.footprint.map((p) => p[0]);
+    const zs = b.footprint.map((p) => p[1]);
+    return { ring: b.footprint, minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+  });
+  const segments: RoadSegment[] = city.roads.flatMap((r) => r.points.slice(1).map((p, i) => ({ a: r.points[i]!, b: p, half: r.width / 2 + KERB_M })));
+  const bounds = {
+    minX: Math.min(city.bounds.minX, ...footprints.map((f) => f.minX), ...segments.map((s) => Math.min(s.a[0], s.b[0]) - s.half)),
+    maxX: Math.max(city.bounds.maxX, ...footprints.map((f) => f.maxX), ...segments.map((s) => Math.max(s.a[0], s.b[0]) + s.half)),
+    minZ: Math.min(city.bounds.minZ, ...footprints.map((f) => f.minZ), ...segments.map((s) => Math.min(s.a[1], s.b[1]) - s.half)),
+    maxZ: Math.max(city.bounds.maxZ, ...footprints.map((f) => f.maxZ), ...segments.map((s) => Math.max(s.a[1], s.b[1]) + s.half)),
+  };
+  const buildingGrid: SpatialIndex = createSpatialIndex(bounds, INDEX_CELL_M, footprints.length);
+  footprints.forEach((f, i) => buildingGrid.insert(i, f.minX, f.minZ, f.maxX, f.maxZ));
+  const roadGrid: SpatialIndex = createSpatialIndex(bounds, INDEX_CELL_M, segments.length);
+  segments.forEach((s, i) => roadGrid.insert(i, Math.min(s.a[0], s.b[0]) - s.half, Math.min(s.a[1], s.b[1]) - s.half, Math.max(s.a[0], s.b[0]) + s.half, Math.max(s.a[1], s.b[1]) + s.half));
+
+  const near = (f: Footprint, x: number, z: number, margin: number): boolean => x >= f.minX - margin && x <= f.maxX + margin && z >= f.minZ - margin && z <= f.maxZ + margin;
+  const segmentDistance = (s: RoadSegment, x: number, z: number): number => {
+    const c = closestOnSegment([x, z], s.a, s.b);
+    return Math.hypot(x - c[0], z - c[1]);
+  };
+
+  /** Does the ray touch the footprint's bounding box within `limit` metres? */
+  const rayHitsBox = (f: Footprint, ox: number, oz: number, dx: number, dz: number, limit: number): boolean => {
+    let enter = 0;
+    let leave = limit;
+    for (const [origin, dir, lo, hi] of [[ox, dx, f.minX, f.maxX], [oz, dz, f.minZ, f.maxZ]] as const) {
+      if (Math.abs(dir) < 1e-12) {
+        if (origin < lo || origin > hi) return false;
+        continue;
+      }
+      const t1 = (lo - origin) / dir;
+      const t2 = (hi - origin) / dir;
+      enter = Math.max(enter, Math.min(t1, t2));
+      leave = Math.min(leave, Math.max(t1, t2));
+      if (enter > leave) return false;
+    }
+    return true;
+  };
+
+  /** The nearest wall along a ray, ignoring anything past `limit` (so a short sight line stops early). */
+  const coverWithin = (ox: number, oz: number, dx: number, dz: number, limit: number): number => {
+    let nearest = Infinity;
+    let inside = false;
+    buildingGrid.ray(ox, oz, dx, dz, limit, (id) => {
+      const f = footprints[id]!;
+      if (inside || !rayHitsBox(f, ox, oz, dx, dz, nearest)) return nearest;
+      if (near(f, ox, oz, 0) && pointInRing([ox, oz], f.ring)) {
+        inside = true;
+        return 0;
+      }
+      for (let i = 0; i < f.ring.length; i += 1) nearest = Math.min(nearest, rayEdge(ox, oz, dx, dz, f.ring[i]!, f.ring[(i + 1) % f.ring.length]!));
+      return nearest;
+    });
+    return inside ? 0 : nearest > limit ? Infinity : nearest;
+  };
+  const rayCover = (ox: number, oz: number, dx: number, dz: number): number => coverWithin(ox, oz, dx, dz, Infinity);
+
+  return {
+    rayCover,
+    rayCoverWithin: coverWithin,
+    clear(ax, az, bx, bz) {
+      const length = Math.hypot(bx - ax, bz - az);
+      return length < 1e-6 || coverWithin(ax, az, (bx - ax) / length, (bz - az) / length, length) >= length;
+    },
+    solidAt(x, z) {
+      let solid = false;
+      buildingGrid.query(x, z, x, z, (id) => {
+        const f = footprints[id]!;
+        if (!solid && near(f, x, z, 0) && pointInRing([x, z], f.ring)) solid = true;
+      });
+      return solid;
+    },
+    contacts(x, z, radius) {
+      const out: Contact[] = [];
+      for (const id of buildingGrid.collect(x - radius, z - radius, x + radius, z + radius)) {
+        const f = footprints[id]!;
+        if (!near(f, x, z, radius)) continue;
+        const contact = circleVsFootprint(x, z, radius, f.ring);
+        if (contact) out.push(contact);
+      }
+      return out;
+    },
+    wallDistance(x, z, cap) {
+      let best = cap;
+      let inside = false;
+      buildingGrid.query(x - cap, z - cap, x + cap, z + cap, (id) => {
+        const f = footprints[id]!;
+        if (inside || !near(f, x, z, cap)) return;
+        if (pointInRing([x, z], f.ring)) {
+          inside = true;
+          return;
+        }
+        for (let i = 0; i < f.ring.length; i += 1) {
+          const c = closestOnSegment([x, z], f.ring[i]!, f.ring[(i + 1) % f.ring.length]!);
+          best = Math.min(best, Math.hypot(x - c[0], z - c[1]));
+        }
+      });
+      return inside ? 0 : best;
+    },
+    onRoad(x, z) {
+      let on = false;
+      roadGrid.query(x, z, x, z, (id) => {
+        const s = segments[id]!;
+        if (!on && segmentDistance(s, x, z) <= s.half) on = true;
+      });
+      return on;
+    },
+    roadDistance(x, z) {
+      const found = roadGrid.nearest(x, z, (id) => segmentDistance(segments[id]!, x, z));
+      return found ? found.distance : Infinity;
+    },
+  };
+}
+
 /* ---------------------------------------------------------------- the city world */
 
 export interface CityVehicleState extends VehicleState {
@@ -198,15 +351,11 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
   const acceleration = spec.acceleration * CITY_ACCEL_SCALE;
   const { bounds } = city;
 
+  const geometry = createIndexedGeometry(city);
   const boxes: Box[] = city.buildings.map((b) => {
     const xs = b.footprint.map((p) => p[0]);
     const zs = b.footprint.map((p) => p[1]);
     return { minX: Math.min(...xs) - HIT_RADIUS, maxX: Math.max(...xs) + HIT_RADIUS, minZ: Math.min(...zs) - HIT_RADIUS, maxZ: Math.max(...zs) + HIT_RADIUS };
-  });
-  const segments = city.roads.flatMap((r) => r.points.slice(1).map((p, i) => ({ a: r.points[i]!, b: p, half: r.width / 2 + 0.4 })));
-  const onRoad = (x: number, z: number): boolean => segments.some((s) => {
-    const c = closestOnSegment([x, z], s.a, s.b);
-    return Math.hypot(x - c[0], z - c[1]) <= s.half;
   });
 
   const layout: ArenaLayout = {
@@ -278,11 +427,7 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
     for (let pass = 0; pass < 3; pass += 1) {
       let moved = false;
       for (const [cx, cz] of hitCircles(x, z, heading)) {
-        for (let i = 0; i < city.buildings.length; i += 1) {
-          const box = boxes[i]!;
-          if (cx < box.minX || cx > box.maxX || cz < box.minZ || cz > box.maxZ) continue;
-          const contact = circleVsFootprint(cx, cz, HIT_RADIUS, city.buildings[i]!.footprint);
-          if (!contact) continue;
+        for (const contact of geometry.contacts(cx, cz, HIT_RADIUS)) {
           x += contact.nx * contact.depth;
           z += contact.nz * contact.depth;
           const vn = vx * contact.nx + vz * contact.nz;
@@ -313,7 +458,7 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
     const ufz = Math.cos(heading);
     forward = vx * ufx + vz * ufz;
     lateral = vx * ufz - vz * ufx;
-    offRoad = !onRoad(x, z);
+    offRoad = !geometry.onRoad(x, z);
   }
 
   const state = (): CityVehicleState => ({ playerId, x, z, heading, speed: forward, kind, lateral, offRoad });

@@ -22,9 +22,9 @@ import {
   type VehicleKind,
   type WeaponKind,
 } from "./contracts";
-import { CITY_ACCEL_SCALE, CITY_SPEED_SCALE, CAR_HIT_RADIUS, hitCircles } from "../maps/midtown";
+import { CITY_ACCEL_SCALE, CITY_SPEED_SCALE, CAR_HIT_RADIUS, createIndexedGeometry, hitCircles, type IndexedGeometry } from "../maps/midtown";
 import type { Bounds, CityData } from "../maps/city-compiler";
-import { createCityGeometry, createRng, resolveBox, type CityGeometry } from "./world";
+import { createRng, resolveBox } from "./world";
 
 export const MATCH_SECONDS = 300;
 export const MATCH_TICKS = MATCH_SECONDS * TICK_RATE;
@@ -110,7 +110,7 @@ const HIT_OFFSET = 1.15;
 const RESTITUTION = 0.25;
 const CONTACT_FRICTION = 0.92;
 
-interface CityPlace { geometry: CityGeometry; bounds: Bounds }
+interface CityPlace { geometry: IndexedGeometry; bounds: Bounds }
 
 /** Everything that differs between the flat arena and a city: walls, spawns, pads and bot sight. */
 interface Place {
@@ -118,8 +118,8 @@ interface Place {
   padRadius: number;
   /** Start positions: the player's first, then one per bot. Draws from the match generator. */
   spawns(rng: () => number, botCount: number): Spawn[];
-  /** Distance along a unit ray to the first wall, Infinity when open. */
-  cover(ox: number, oz: number, dx: number, dz: number): number;
+  /** Distance along a unit ray to the first wall, Infinity when open. A `limit` lets a city stop looking past it. */
+  cover(ox: number, oz: number, dx: number, dz: number, limit?: number): number;
   /** True where a missile bursts on solid ground. */
   solid(x: number, z: number): boolean;
   /** Push a shoved car back out of walls. */
@@ -184,7 +184,7 @@ function cityPads(city: CityData): PickupPad[] {
 }
 
 function cityPlace(city: CityData): Place {
-  const geometry = createCityGeometry(city);
+  const geometry = createIndexedGeometry(city);
   const { bounds } = city;
   const layout: CombatArenaLayout = {
     halfExtent: Math.max(Math.abs(bounds.minX), Math.abs(bounds.maxX), Math.abs(bounds.minZ), Math.abs(bounds.maxZ)),
@@ -217,7 +217,7 @@ function cityPlace(city: CityData): Place {
       }
       return [player, ...Array.from({ length: botCount }, (_, i) => near[i] ?? pool[(i + 1) % pool.length]!)];
     },
-    cover: geometry.rayCover,
+    cover: (ox, oz, dx, dz, limit = Infinity) => geometry.rayCoverWithin(ox, oz, dx, dz, limit),
     solid: (x, z) => !inside(x, z) || geometry.solidAt(x, z),
     settle(car) {
       for (let pass = 0; pass < 3; pass += 1) {
@@ -522,8 +522,13 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
     const fx = Math.sin(car.heading);
     const fz = Math.cos(car.heading);
     const angleTo = (other: Car): number => Math.abs(Math.atan2(fx * (other.z - car.z) - fz * (other.x - car.x), fx * (other.x - car.x) + fz * (other.z - car.z)));
-    const visible = (other: Car): boolean => other.alive && other.playerId !== car.playerId && Math.hypot(other.x - car.x, other.z - car.z) <= LOCK_RANGE
-      && place.cover(car.x, car.z, other.x - car.x, other.z - car.z) >= Math.hypot(other.x - car.x, other.z - car.z);
+    // The direction is not normalised, so the ray's parameter is in car-to-car lengths: the rule is
+    // unchanged, and `gap` is the farthest the ray needs to be followed.
+    const visible = (other: Car): boolean => {
+      const gap = Math.hypot(other.x - car.x, other.z - car.z);
+      return other.alive && other.playerId !== car.playerId && gap <= LOCK_RANGE
+        && place.cover(car.x, car.z, other.x - car.x, other.z - car.z, gap) >= gap;
+    };
     const kept = carById(car.lockId);
     if (kept && visible(kept) && angleTo(kept) <= LOCK_KEEP_CONE) return;
     let best: Car | null = null;
@@ -545,7 +550,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
     const dz = Math.cos(heading);
     const ox = car.x + dx * 1.5;
     const oz = car.z + dz * 1.5;
-    const cover = place.cover(ox, oz, dx, dz);
+    const cover = place.cover(ox, oz, dx, dz, GUN_RANGE);
     let reach = Math.min(GUN_RANGE, cover);
     let victim: Car | null = null;
     for (const other of cars) {

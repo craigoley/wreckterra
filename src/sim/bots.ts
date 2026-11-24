@@ -1,6 +1,7 @@
 import { lineClear } from "./arena";
 import type { CombatArenaLayout, CombatVehicleState, PickupState } from "./contracts";
 import type { CityData } from "../maps/city-compiler";
+import { createSpatialIndex } from "../maps/spatial-index";
 import { createRng, type CityGeometry } from "./world";
 
 /** What a bot needs to know about a city: where the streets lead and what a building hides. */
@@ -14,6 +15,11 @@ export interface BotNav {
    * route. Given the car's heading, a junction behind it costs a U-turn's worth of extra distance.
    */
   waypoint(x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number } | null;
+  /**
+   * Where to steer to stay on the lane centre when travelling by street to a goal: a point a short
+   * look-ahead along the street path, and the next sharp corner on it (how far, how sharp) if any.
+   */
+  steer(x: number, z: number, gx: number, gz: number, heading: number, speed: number): { x: number; z: number; corner?: { distance: number; angle: number } } | null;
   /** A street spot near (x, z) that a threat at (tx, tz) cannot see, or null when there is none. */
   coverSpot(x: number, z: number, tx: number, tz: number): { x: number; z: number } | null;
 }
@@ -68,6 +74,18 @@ const COVER_SEARCH_M = 140;
 /** Extra road distance charged for a first junction that lies behind the car. */
 const U_TURN_M = 60;
 const INF = Number.POSITIVE_INFINITY;
+/** Look-ahead on the lane centre: this far, plus this much per m/s of speed. */
+const LANE_LOOKAHEAD_M = 7;
+const LANE_LOOKAHEAD_PER_MS = 0.35;
+/** A turn sharper than this (radians) at a junction is a corner worth braking for. */
+const CORNER_MIN_ANGLE = 0.5;
+const CORNER_SCAN_M = 90;
+/** Inside this distance, with nothing in the way, a bot drives straight at its goal instead of by street. */
+const DIRECT_M = 26;
+/** The braking a bot plans a corner with, m/s squared: well under what the car can do. */
+const PLANNED_BRAKE = 24;
+/** Cell edge of the street-segment grid, metres. */
+const SNAP_CELL_M = 32;
 
 /**
  * Street routing for a city match. Streets are treated as two-way (a wreck-fest ignores one-way
@@ -77,8 +95,10 @@ const INF = Number.POSITIVE_INFINITY;
 export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav {
   const nodes = city.graph.nodes;
   const count = nodes.length;
-  const dist: number[][] = Array.from({ length: count }, (_, i) => Array.from({ length: count }, (_, j) => (i === j ? 0 : INF)));
-  const next: number[][] = Array.from({ length: count }, () => Array.from({ length: count }, () => -1));
+  // Flat typed arrays: the all-pairs sweep below is n cubed, so it must not chase nested arrays.
+  const dist = new Float64Array(count * count).fill(INF);
+  const next = new Int32Array(count * count).fill(-1);
+  for (let i = 0; i < count; i += 1) dist[i * count + i] = 0;
   const seen = new Set<string>();
   const segments: { a: number; b: number }[] = [];
   for (const e of city.graph.edges) {
@@ -86,63 +106,81 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     if (e.from === e.to || seen.has(key)) continue;
     seen.add(key);
     segments.push({ a: e.from, b: e.to });
-    dist[e.from]![e.to] = e.length;
-    dist[e.to]![e.from] = e.length;
-    next[e.from]![e.to] = e.to;
-    next[e.to]![e.from] = e.from;
+    dist[e.from * count + e.to] = e.length;
+    dist[e.to * count + e.from] = e.length;
+    next[e.from * count + e.to] = e.to;
+    next[e.to * count + e.from] = e.from;
   }
   for (let k = 0; k < count; k += 1) {
     for (let i = 0; i < count; i += 1) {
+      const ik = dist[i * count + k]!;
+      if (ik === INF) continue;
       for (let j = 0; j < count; j += 1) {
-        if (dist[i]![k]! + dist[k]![j]! < dist[i]![j]!) {
-          dist[i]![j] = dist[i]![k]! + dist[k]![j]!;
-          next[i]![j] = next[i]![k]!;
+        const through = ik + dist[k * count + j]!;
+        if (through < dist[i * count + j]!) {
+          dist[i * count + j] = through;
+          next[i * count + j] = next[i * count + k]!;
         }
       }
     }
   }
 
+  // Segments are filed in a grid, so snapping a car to the street looks at the few nearest ones.
+  const segmentGrid = createSpatialIndex(city.bounds, SNAP_CELL_M, segments.length);
+  segments.forEach((s, i) => {
+    const a = nodes[s.a]!;
+    const b = nodes[s.b]!;
+    segmentGrid.insert(i, Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z));
+  });
+  /** Where on street segment `i` the point (x, z) lands, as a fraction of its length. */
+  const along = (i: number, x: number, z: number): number => {
+    const a = nodes[segments[i]!.a]!;
+    const b = nodes[segments[i]!.b]!;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len2 = dx * dx + dz * dz;
+    return len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+  };
+  const distanceToSegment = (i: number, x: number, z: number): number => {
+    const a = nodes[segments[i]!.a]!;
+    const b = nodes[segments[i]!.b]!;
+    const t = along(i, x, z);
+    return Math.hypot(x - (a.x + (b.x - a.x) * t), z - (a.z + (b.z - a.z) * t));
+  };
   const snap = (x: number, z: number): { seg: number; x: number; z: number } => {
-    let best = { seg: -1, x, z };
-    let bestD = INF;
-    segments.forEach((s, i) => {
-      const a = nodes[s.a]!;
-      const b = nodes[s.b]!;
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len2 = dx * dx + dz * dz;
-      const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
-      const px = a.x + dx * t;
-      const pz = a.z + dz * t;
-      const d = Math.hypot(x - px, z - pz);
-      if (d < bestD) { bestD = d; best = { seg: i, x: px, z: pz }; }
-    });
-    return best;
+    const found = segmentGrid.nearest(x, z, (i) => distanceToSegment(i, x, z));
+    if (!found) return { seg: -1, x, z };
+    const a = nodes[segments[found.id]!.a]!;
+    const b = nodes[segments[found.id]!.b]!;
+    const t = along(found.id, x, z);
+    return { seg: found.id, x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
   };
 
-  const route = (x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number }[] | null => {
+  /** The street path to a goal: the car's own spot on the nearest street, then junctions, then the goal's spot. */
+  const route = (x: number, z: number, gx: number, gz: number, heading?: number): { start: { x: number; z: number }; path: { x: number; z: number }[] } | null => {
     const from = snap(x, z);
     const to = snap(gx, gz);
     if (from.seg < 0 || to.seg < 0) return null;
-    if (from.seg === to.seg) return [{ x: to.x, z: to.z }];
+    const start = { x: from.x, z: from.z };
+    if (from.seg === to.seg) return { start, path: [{ x: to.x, z: to.z }] };
     let bestCost = INF;
     let bestS = -1;
     let bestE = -1;
     for (const s of [segments[from.seg]!.a, segments[from.seg]!.b]) {
       for (const e of [segments[to.seg]!.a, segments[to.seg]!.b]) {
         const behind = heading !== undefined && (nodes[s]!.x - x) * Math.sin(heading) + (nodes[s]!.z - z) * Math.cos(heading) < 0;
-        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s]![e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
+        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s * count + e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
         if (cost < bestCost) { bestCost = cost; bestS = s; bestE = e; }
       }
     }
     if (bestS < 0) return null;
     const path = [{ x: nodes[bestS]!.x, z: nodes[bestS]!.z }];
     for (let at = bestS; at !== bestE;) {
-      at = next[at]![bestE]!;
+      at = next[at * count + bestE]!;
       path.push({ x: nodes[at]!.x, z: nodes[at]!.z });
     }
     path.push({ x: to.x, z: to.z });
-    return path;
+    return { start, path };
   };
 
   const { bounds } = city;
@@ -158,11 +196,41 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     open: (x, z, margin) => x > bounds.minX + margin && x < bounds.maxX - margin && z > bounds.minZ + margin && z < bounds.maxZ - margin
       && geometry.wallDistance(x, z, margin) >= margin,
     waypoint(x, z, gx, gz, heading) {
-      const path = route(x, z, gx, gz, heading);
+      const path = route(x, z, gx, gz, heading)?.path;
       if (!path) return null;
       let i = 0;
       while (i < path.length - 1 && Math.hypot(path[i]!.x - x, path[i]!.z - z) < REACH_M) i += 1;
       return path[i]!;
+    },
+    steer(x, z, gx, gz, heading, speed) {
+      const lane = route(x, z, gx, gz, heading);
+      if (!lane) return null;
+      // Pure pursuit on the lane centre: aim a look-ahead past the car's own spot on the street, so a
+      // car that has drifted to the kerb, or been shoved off, swings back onto the lane by itself.
+      const reach = LANE_LOOKAHEAD_M + Math.abs(speed) * LANE_LOOKAHEAD_PER_MS;
+      const points = [lane.start, ...lane.path];
+      let aim = points[points.length - 1]!;
+      let aimed = false;
+      let corner: { distance: number; angle: number } | undefined;
+      let travelled = 0;
+      for (let k = 0; k + 1 < points.length && travelled < CORNER_SCAN_M && !(aimed && corner); k += 1) {
+        const a = points[k]!;
+        const b = points[k + 1]!;
+        const leg = Math.hypot(b.x - a.x, b.z - a.z);
+        if (leg < 1e-6) continue;
+        if (!aimed && travelled + leg >= reach) {
+          const t = (reach - travelled) / leg;
+          aim = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
+          aimed = true;
+        }
+        const c = points[k + 2];
+        if (!corner && c) {
+          const turn = Math.abs(wrap(Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(b.x - a.x, b.z - a.z)));
+          if (turn > CORNER_MIN_ANGLE) corner = { distance: travelled + leg, angle: turn };
+        }
+        travelled += leg;
+      }
+      return { x: aim.x, z: aim.z, corner };
     },
     coverSpot(x, z, tx, tz) {
       let best: { x: number; z: number } | null = null;
@@ -176,6 +244,11 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
       return best;
     },
   };
+}
+
+/** The speed a car can hold through a junction turn of this angle (radians) without leaving the street. */
+function cornerSpeed(angle: number): number {
+  return angle > 1.2 ? 8 : angle > 0.8 ? 11 : 15;
 }
 
 /**
@@ -273,9 +346,17 @@ export function createBotBrain(seed: number): BotBrain {
 
       let desired = self.heading;
       if (goal) {
-        // By street unless the way to the goal is open: buildings are walls, so go round them.
+        // By street, along the lane centre, unless the goal is close and in plain sight: then straight at it.
         let aim: { x: number; z: number } = goal;
-        if (nav && !nav.clear(self.x, self.z, goal.x, goal.z)) aim = nav.waypoint(self.x, self.z, goal.x, goal.z, self.heading) ?? goal;
+        let ahead: { distance: number; angle: number } | undefined;
+        const toGoal = Math.hypot(goal.x - self.x, goal.z - self.z);
+        if (nav && !(toGoal < DIRECT_M && nav.clear(self.x, self.z, goal.x, goal.z))) {
+          const lane = nav.steer(self.x, self.z, goal.x, goal.z, self.heading, self.speed);
+          if (lane) {
+            aim = lane;
+            ahead = lane.corner;
+          }
+        }
         desired = Math.atan2(aim.x - self.x, aim.z - self.z);
         if (weaving) desired += weaveDir * 0.55;
         // Look ahead for cover or walls and swing wide when the way is blocked.
@@ -300,6 +381,11 @@ export function createBotBrain(seed: number): BotBrain {
         command.throttle = holdPosition || (arrived && goal !== target) ? 0 : Math.abs(error) > 1.4 ? 0.3 : corner ? 0.35 : distance < 9 && goal === target ? 0.4 : 1;
         if (nav && Math.abs(error) > 0.6 && self.speed > (Math.abs(error) > 1.4 ? 9 : 18)) {
           // Turning round, or into a side street: shed speed first so the car stays on the road.
+          command.throttle = 0;
+          command.brake = true;
+        }
+        if (ahead && self.speed > cornerSpeed(ahead.angle) && (self.speed ** 2 - cornerSpeed(ahead.angle) ** 2) / (2 * PLANNED_BRAKE) >= ahead.distance - 3) {
+          // A sharp junction is coming up faster than the car can take it: shed the speed now.
           command.throttle = 0;
           command.brake = true;
         }
