@@ -258,8 +258,8 @@ function ControlsCard({ mode }: { mode: Mode }) {
   return <section className="controls-card" aria-label="Controls">
     <h2>Controls</h2>
     {mode === "touch"
-      ? <p>Use the pads under the city: left and right to steer, gas, reverse and brake, then fire, missile and special.</p>
-      : <p>Arrows or WASD to drive, Space or J to fire, K for a missile, L for your special, R to restart. A gamepad works too.</p>}
+      ? <p>Drag anywhere on the left half of the city to steer; drag down to reverse. Your right thumb fires: hold Fire for the gun, tap Missile and Special.</p>
+      : <p>WASD or arrows to drive, Space to fire, Q for a missile, E for your special, Shift for the handbrake, R to restart. A gamepad works too.</p>}
   </section>;
 }
 
