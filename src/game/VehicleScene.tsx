@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { createControls, type Controls } from "../input/controls";
 import type { CityData } from "../maps/city-compiler";
 import { CITY_SPEED_SCALE } from "../maps/midtown";
 import { VEHICLE_SPECS } from "../sim/arena";
@@ -11,6 +12,12 @@ export const VEHICLES = [
   { id: "voltage", name: "Voltage", role: "Agile interceptor", color: "#b2cfde", speed: 5, armor: 2 },
 ] as const;
 export type Vehicle = (typeof VEHICLES)[number];
+
+/** The one controls adapter for a match: keyboard, gamepad and touch all arrive as the same intent. */
+export function useDriverControls(): Controls {
+  const [controls] = useState(() => createControls());
+  return controls;
+}
 
 export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {
   return <div className="vehicle-scene">
@@ -49,7 +56,8 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
 }
 
 const noteStyle: CSSProperties = { margin: 0, padding: "1rem", textAlign: "center", color: "#d8e0d0" };
-const stageStyle: CSSProperties = { position: "relative", width: "100%", aspectRatio: "16 / 10", minHeight: 260, maxHeight: "70vh", background: "#b9c7d4", borderRadius: 12, overflow: "hidden", border: "2px solid #47604c" };
+/** Size lives in styles.css (.city-battle) so a portrait phone can give the city most of the screen. */
+const stageStyle: CSSProperties = { position: "relative", width: "100%", background: "#b9c7d4", borderRadius: 12, overflow: "hidden", border: "2px solid #47604c" };
 
 const COLORS: Record<string, string> = Object.fromEntries(VEHICLES.map((v) => [v.id, v.color]));
 
