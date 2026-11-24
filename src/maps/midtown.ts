@@ -17,7 +17,9 @@ import {
   type VehicleKind,
   type VehicleState,
 } from "../sim/contracts";
+import type { LatLon } from "./city-cache";
 import { CITY_VERSION, closestOnSegment, pointInRing, signedArea, type CityData, type Vec2 } from "./city-compiler";
+import { loadLiveCity, type LiveCityDeps } from "./tile-city";
 
 /** The compiled city is a static file served from our own origin: production never calls Overpass. */
 export const CITY_URL = `${import.meta.env.BASE_URL}maps/midtown/city.json`;
@@ -55,6 +57,38 @@ export async function loadCity(url: string = CITY_URL, fetchImpl: typeof fetch =
   const response = await fetchImpl(url);
   if (!response.ok) throw new Error(`The city file could not be loaded (HTTP ${response.status}).`);
   return parseCity(await response.json());
+}
+
+/** What the game plays in: a live city from map tiles, or the pinned city with the reason it stood in. */
+export interface PlayableCity { city: CityData; live: boolean; reason: string | null }
+
+export interface PlayableCityOptions {
+  /** Tile fetching and caching; defaults to OpenFreeMap tiles and the IndexedDB cache. */
+  live?: LiveCityDeps;
+  /** Loader for the pinned city; defaults to `loadCity`. */
+  pinned?: () => Promise<CityData>;
+}
+
+async function browserLiveDeps(): Promise<LiveCityDeps> {
+  // Loaded on demand so the tile decoder stays out of the pinned-city path.
+  const [{ fetchTileFeatures }, { createIndexedDbStore }] = await Promise.all([import("./live-tiles"), import("./city-cache")]);
+  return { fetchTiles: (request) => fetchTileFeatures(request), cache: createIndexedDbStore() };
+}
+
+/**
+ * Load a city for a picked place beside the pinned loader: a live city built from map tiles when
+ * they can be had, otherwise the pinned Midtown city together with why. No geometry is invented.
+ */
+export async function loadPlayableCity(point: LatLon, options: PlayableCityOptions = {}): Promise<PlayableCity> {
+  let reason: string;
+  try {
+    const outcome = await loadLiveCity(point, options.live ?? (await browserLiveDeps()));
+    if (outcome.ok) return { city: outcome.city, live: true, reason: null };
+    reason = outcome.reason;
+  } catch (error) {
+    reason = `Live map tiles are not available (${error instanceof Error ? error.message : String(error)}). The pinned Midtown city is offered instead.`;
+  }
+  return { city: await (options.pinned ?? (() => loadCity()))(), live: false, reason };
 }
 
 /* ---------------------------------------------------------------- collision */
