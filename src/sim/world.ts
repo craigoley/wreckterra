@@ -76,7 +76,7 @@ function validateInput(raw: unknown, playerId: string): { ok: true; input: Input
 }
 
 /** Push a circle out of an axis-aligned box. Returns true when contact was resolved. */
-function resolveBox(vehicle: VehicleState, box: Obstacle): boolean {
+export function resolveBox(vehicle: { x: number; z: number }, box: Obstacle, radius: number = VEHICLE_RADIUS): boolean {
   const dx = vehicle.x - box.x;
   const dz = vehicle.z - box.z;
   const nearestX = Math.max(-box.halfX, Math.min(box.halfX, dx));
@@ -84,17 +84,17 @@ function resolveBox(vehicle: VehicleState, box: Obstacle): boolean {
   const gx = dx - nearestX;
   const gz = dz - nearestZ;
   const distance = Math.hypot(gx, gz);
-  if (distance >= VEHICLE_RADIUS) return false;
+  if (distance >= radius) return false;
   if (distance > 0) {
-    const push = (VEHICLE_RADIUS - distance) / distance;
+    const push = (radius - distance) / distance;
     vehicle.x += gx * push;
     vehicle.z += gz * push;
   } else {
     // Centre is inside the box: leave through the shallowest face.
     const outX = box.halfX - Math.abs(dx);
     const outZ = box.halfZ - Math.abs(dz);
-    if (outX < outZ) vehicle.x += (dx >= 0 ? 1 : -1) * (outX + VEHICLE_RADIUS);
-    else vehicle.z += (dz >= 0 ? 1 : -1) * (outZ + VEHICLE_RADIUS);
+    if (outX < outZ) vehicle.x += (dx >= 0 ? 1 : -1) * (outX + radius);
+    else vehicle.z += (dz >= 0 ? 1 : -1) * (outZ + radius);
   }
   return true;
 }
