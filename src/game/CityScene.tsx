@@ -2,8 +2,9 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { BufferGeometry, Color, DirectionalLight, Float32BufferAttribute, Group, InstancedMesh, Mesh, Object3D, ShapeUtils, Vector2 } from "three";
 import type { Building, CityData, Road, Vec2 } from "../maps/city-compiler";
-import type { CityAuthority } from "../maps/midtown";
-import { CONTRACT_VERSION } from "../sim/contracts";
+import { CITY_PAD_RADIUS } from "../sim/combat";
+import type { CombatAuthority, CombatSnapshot } from "../sim/contracts";
+import { CombatEffects, type EffectsBus } from "./CombatEffects";
 import { ChaseCamera, type ChaseTarget } from "./ChaseCamera";
 import { createCityMaterials, createSkyGeometry, FACADE_PALETTES, facadeVariant, GROUND_FLOOR_M, FLOOR_HEIGHT_M, HAZE, ROAD_TILE_M, TILE_WIDTH_M, type CityMaterials } from "./cityMaterials";
 import type { Held } from "./TouchControls";
@@ -298,38 +299,68 @@ const CityMeshes = memo(function CityMeshes({ city, materials }: { city: CityDat
   );
 });
 
-/* ---------------------------------------------------------------- the car */
+/* ---------------------------------------------------------------- the cars */
 
-/** An original combat car built from primitives: wedge nose, armoured flanks, roof gun, spiked ram. */
-function CombatCar({ color, group }: { color: string; group: RefObject<Group | null> }) {
-  const dark = "#1d2126";
-  const steel = "#8b949b";
-  const wheels: [number, number][] = [[-1.0, 1.45], [1.0, 1.45], [-1.0, -1.45], [1.0, -1.45]];
+const DARK = "#1d2126";
+const STEEL = "#8b949b";
+const WHEELS: [number, number][] = [[-1.0, 1.45], [1.0, 1.45], [-1.0, -1.45], [1.0, -1.45]];
+
+/**
+ * An original combat car built from primitives: wedge nose, armoured flanks, roof machine gun and a
+ * missile rack. Three builds share one chassis and differ in stance and kit: Voltage is low and
+ * winged, Switchback is the balanced all-rounder, Rivet is a wide bruiser with a plough and plates.
+ */
+function CombatCar({ kind, color, accent }: { kind: string; color: string; accent: string }) {
+  const scale: [number, number, number] = kind === "voltage" ? [0.92, 0.9, 1.04] : kind === "rivet" ? [1.18, 1.15, 1] : [1, 1, 1];
   return (
-    <group ref={group}>
+    <group scale={scale}>
       <mesh position={[0, 0.78, 0]} castShadow><boxGeometry args={[1.9, 0.55, 4.3]} /><meshStandardMaterial color={color} roughness={0.5} metalness={0.3} /></mesh>
       <mesh position={[0, 1.12, 1.2]} rotation-x={0.18} castShadow><boxGeometry args={[1.8, 0.28, 1.7]} /><meshStandardMaterial color={color} roughness={0.5} metalness={0.3} /></mesh>
+      <mesh position={[0, 1.27, 1.15]} rotation-x={0.18}><boxGeometry args={[0.5, 0.04, 1.6]} /><meshStandardMaterial color={accent} roughness={0.4} /></mesh>
       <mesh position={[0, 1.4, -0.45]} castShadow><boxGeometry args={[1.55, 0.62, 1.9]} /><meshStandardMaterial color="#202c35" roughness={0.25} metalness={0.6} /></mesh>
-      <mesh position={[-1.02, 0.85, 0]} castShadow><boxGeometry args={[0.16, 0.5, 3.2]} /><meshStandardMaterial color={steel} roughness={0.4} metalness={0.7} /></mesh>
-      <mesh position={[1.02, 0.85, 0]} castShadow><boxGeometry args={[0.16, 0.5, 3.2]} /><meshStandardMaterial color={steel} roughness={0.4} metalness={0.7} /></mesh>
-      <mesh position={[0, 0.62, 2.35]} castShadow><boxGeometry args={[2.05, 0.34, 0.45]} /><meshStandardMaterial color={dark} roughness={0.5} metalness={0.6} /></mesh>
-      {[-0.7, 0, 0.7].map((x) => <mesh key={x} position={[x, 0.62, 2.8]} rotation-x={Math.PI / 2} castShadow><coneGeometry args={[0.13, 0.5, 6]} /><meshStandardMaterial color={steel} metalness={0.8} roughness={0.3} /></mesh>)}
-      <mesh position={[0, 1.88, -0.4]} castShadow><cylinderGeometry args={[0.32, 0.38, 0.28, 10]} /><meshStandardMaterial color={dark} metalness={0.6} roughness={0.4} /></mesh>
-      <mesh position={[0, 1.95, 0.45]} castShadow><boxGeometry args={[0.14, 0.14, 1.5]} /><meshStandardMaterial color={steel} metalness={0.8} roughness={0.3} /></mesh>
-      <mesh position={[0, 1.5, -2.05]} castShadow><boxGeometry args={[1.9, 0.1, 0.5]} /><meshStandardMaterial color={dark} roughness={0.6} /></mesh>
-      <mesh position={[0, 1.2, -1.95]}><boxGeometry args={[0.12, 0.6, 0.12]} /><meshStandardMaterial color={dark} /></mesh>
+      <mesh position={[-1.02, 0.85, 0]} castShadow><boxGeometry args={[0.16, 0.5, 3.2]} /><meshStandardMaterial color={STEEL} roughness={0.4} metalness={0.7} /></mesh>
+      <mesh position={[1.02, 0.85, 0]} castShadow><boxGeometry args={[0.16, 0.5, 3.2]} /><meshStandardMaterial color={STEEL} roughness={0.4} metalness={0.7} /></mesh>
+      <mesh position={[0, 0.62, 2.35]} castShadow><boxGeometry args={[2.05, 0.34, 0.45]} /><meshStandardMaterial color={DARK} roughness={0.5} metalness={0.6} /></mesh>
+      {[-0.7, 0, 0.7].map((x) => <mesh key={x} position={[x, 0.62, 2.8]} rotation-x={Math.PI / 2} castShadow><coneGeometry args={[0.13, 0.5, 6]} /><meshStandardMaterial color={STEEL} metalness={0.8} roughness={0.3} /></mesh>)}
+      <mesh position={[0, 1.88, -0.4]} castShadow><cylinderGeometry args={[0.32, 0.38, 0.28, 10]} /><meshStandardMaterial color={DARK} metalness={0.6} roughness={0.4} /></mesh>
+      <mesh position={[0, 1.95, 0.45]} castShadow><boxGeometry args={[0.14, 0.14, 1.5]} /><meshStandardMaterial color={STEEL} metalness={0.8} roughness={0.3} /></mesh>
+      {[-0.55, 0.55].map((x) => <mesh key={`m${x}`} position={[x, 1.78, -0.9]} rotation-x={Math.PI / 2} castShadow><cylinderGeometry args={[0.13, 0.13, 1.2, 8]} /><meshStandardMaterial color="#3a4249" metalness={0.7} roughness={0.35} /></mesh>)}
+      {[-0.55, 0.55].map((x) => <mesh key={`n${x}`} position={[x, 1.78, -0.28]} rotation-x={Math.PI / 2}><coneGeometry args={[0.12, 0.3, 8]} /><meshStandardMaterial color="#c9ced2" metalness={0.5} roughness={0.4} /></mesh>)}
+      <mesh position={[0, 2.12, -0.4]}><boxGeometry args={[0.22, 0.12, 0.22]} /><meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={1.6} /></mesh>
+      <mesh position={[0, 1.5, -2.05]} castShadow><boxGeometry args={[kind === "voltage" ? 2.3 : 1.9, 0.1, 0.5]} /><meshStandardMaterial color={DARK} roughness={0.6} /></mesh>
+      <mesh position={[0, 1.2, -1.95]}><boxGeometry args={[0.12, 0.6, 0.12]} /><meshStandardMaterial color={DARK} /></mesh>
+      {kind === "voltage" && [-1.1, 1.1].map((x) => <mesh key={`f${x}`} position={[x, 1.6, -2.0]} castShadow><boxGeometry args={[0.08, 0.5, 0.7]} /><meshStandardMaterial color={accent} roughness={0.4} /></mesh>)}
+      {kind === "rivet" && (
+        <>
+          <mesh position={[0, 0.9, 3.0]} rotation-x={-0.35} castShadow><boxGeometry args={[2.5, 0.8, 0.18]} /><meshStandardMaterial color={STEEL} metalness={0.8} roughness={0.35} /></mesh>
+          <mesh position={[0, 1.78, 0.5]} castShadow><boxGeometry args={[1.7, 0.1, 1.2]} /><meshStandardMaterial color={DARK} metalness={0.6} roughness={0.4} /></mesh>
+          {[-0.75, 0.75].map((x) => <mesh key={`e${x}`} position={[x, 1.7, -1.7]} castShadow><cylinderGeometry args={[0.1, 0.12, 0.9, 8]} /><meshStandardMaterial color="#555c61" metalness={0.8} roughness={0.4} /></mesh>)}
+        </>
+      )}
       {[-0.65, 0.65].map((x) => <mesh key={`h${x}`} position={[x, 0.85, 2.17]}><boxGeometry args={[0.4, 0.16, 0.06]} /><meshStandardMaterial color="#fff6d6" emissive="#fff0b3" emissiveIntensity={1.4} /></mesh>)}
       {[-0.7, 0.7].map((x) => <mesh key={`t${x}`} position={[x, 0.9, -2.17]}><boxGeometry args={[0.45, 0.14, 0.06]} /><meshStandardMaterial color="#aa1d1d" emissive="#ff2a2a" emissiveIntensity={0.9} /></mesh>)}
-      {wheels.map(([x, z]) => (
+      {WHEELS.map(([x, z]) => (
         <mesh key={`${x}${z}`} position={[x * 1.02, 0.46, z]} rotation-z={Math.PI / 2} castShadow>
           <cylinderGeometry args={[0.47, 0.47, 0.38, 14]} /><meshStandardMaterial color="#15181b" roughness={0.9} />
         </mesh>
       ))}
-      {wheels.map(([x, z]) => (
+      {WHEELS.map(([x, z]) => (
         <mesh key={`r${x}${z}`} position={[x * 1.12, 0.46, z]} rotation-z={Math.PI / 2}>
-          <cylinderGeometry args={[0.26, 0.26, 0.4, 10]} /><meshStandardMaterial color={steel} metalness={0.8} roughness={0.3} />
+          <cylinderGeometry args={[0.26, 0.26, 0.4, 10]} /><meshStandardMaterial color={STEEL} metalness={0.8} roughness={0.3} />
         </mesh>
       ))}
+    </group>
+  );
+}
+
+/** What is left of a wrecked car: a charred, tilted shell the fire effects burn on. */
+function Wreck() {
+  return (
+    <group rotation={[0.1, 0, 0.22]}>
+      <mesh position={[0, 0.7, 0]}><boxGeometry args={[1.9, 0.6, 4.2]} /><meshStandardMaterial color="#17191b" roughness={1} /></mesh>
+      <mesh position={[0.1, 1.2, -0.4]} rotation-z={0.15}><boxGeometry args={[1.5, 0.5, 1.8]} /><meshStandardMaterial color="#0f1112" roughness={1} /></mesh>
+      <mesh position={[-0.5, 0.9, 1.5]} rotation-x={0.4}><boxGeometry args={[0.8, 0.12, 1.2]} /><meshStandardMaterial color="#2a1d14" roughness={1} /></mesh>
+      {WHEELS.slice(0, 3).map(([x, z]) => <mesh key={`${x}${z}`} position={[x * 1.05, 0.4, z]} rotation-z={Math.PI / 2}><cylinderGeometry args={[0.45, 0.45, 0.36, 10]} /><meshStandardMaterial color="#0c0d0e" roughness={1} /></mesh>)}
     </group>
   );
 }
@@ -347,32 +378,159 @@ export function readControls(held: Held, pad: { axes: readonly number[]; buttons
   return { steer: Math.max(-1, Math.min(1, steer)), throttle: Math.max(-1, Math.min(1, throttle)), brake: held.brake || Boolean(pad?.buttons[3]?.pressed) };
 }
 
-function Driver({ world, held, color, pose, speedo, maxSpeed }: {
-  world: CityAuthority; held: RefObject<Held>; color: string; pose: MutableRefObject<ChaseTarget>; speedo: RefObject<HTMLElement | null>; maxSpeed: number;
-}) {
-  const group = useRef<Group>(null);
-  const shown = useRef(0);
-  useFrame((_, delta) => {
-    const pad = typeof navigator !== "undefined" && typeof navigator.getGamepads === "function" ? navigator.getGamepads()[0] : null;
-    const controls = readControls(held.current!, pad);
-    const tick = world.snapshot().tick;
-    world.submitInput({ v: CONTRACT_VERSION, tick, playerId: "player-1", ...controls });
-    world.advance(Math.min(delta, 0.1));
-    const car = world.snapshot().vehicles[0]!;
+/** The newest simulation state, read once per frame so every part of the scene sees the same instant. */
+function Hub({ match, live, pose }: { match: CombatAuthority; live: MutableRefObject<CombatSnapshot>; pose: MutableRefObject<ChaseTarget> }) {
+  useFrame(() => {
+    const snapshot = match.snapshot();
+    live.current = snapshot;
+    const car = snapshot.vehicles[0]!;
     pose.current = { x: car.x, z: car.z, heading: car.heading, speed: car.speed };
-    const g = group.current;
+  }, -3);
+  return null;
+}
+
+export interface FleetEntry { id: string; kind: string; bot: boolean }
+
+function Fighter({ live, entry, color }: { live: MutableRefObject<CombatSnapshot>; entry: FleetEntry; color: string }) {
+  const root = useRef<Group>(null);
+  const body = useRef<Group>(null);
+  const intact = useRef<Group>(null);
+  const wreck = useRef<Group>(null);
+  const flash = useRef<Mesh>(null);
+  const bar = useRef<Group>(null);
+  const fill = useRef<Mesh>(null);
+  useFrame(({ camera }) => {
+    const snapshot = live.current;
+    const car = snapshot.vehicles.find((v) => v.playerId === entry.id);
+    const r = root.current;
+    const b = body.current;
+    if (!car || !r || !b) return;
+    r.position.set(car.x, 0, car.z);
+    b.rotation.set(0, car.heading, 0);
+    b.position.y = car.airborne > 0 ? 0.9 : 0;
+    if (intact.current) intact.current.visible = car.alive;
+    if (wreck.current) wreck.current.visible = !car.alive;
+    if (flash.current) flash.current.visible = car.alive && snapshot.tick - car.lastHitTick < 5;
+    const g = bar.current;
     if (g) {
-      g.position.set(car.x, 0, car.z);
-      g.rotation.set(0, car.heading, 0);
-      g.rotateZ(-car.lateral * 0.012);
+      g.visible = car.alive && entry.bot;
+      g.quaternion.copy(camera.quaternion);
     }
-    const el = speedo.current;
-    if (el && tick - shown.current >= 6) {
-      shown.current = tick;
-      el.textContent = `${Math.round(Math.abs(car.speed) * 3.6)} km/h`;
+    if (fill.current) {
+      const f = Math.max(0.001, car.health / car.maxHealth);
+      fill.current.scale.x = f;
+      fill.current.position.x = -(1 - f) * 1.2;
     }
-  }, -2);
-  return <CombatCar color={color} group={group} />;
+  });
+  return (
+    <group ref={root}>
+      <group ref={body}>
+        <group ref={intact}>
+          <CombatCar kind={entry.kind} color={color} accent={entry.bot ? "#e0442f" : "#35b6ff"} />
+          <mesh ref={flash} position={[0, 1.1, 0]} visible={false}>
+            <boxGeometry args={[2.3, 1.7, 4.8]} /><meshBasicMaterial color="#ffffff" transparent opacity={0.55} depthWrite={false} />
+          </mesh>
+        </group>
+        <group ref={wreck} visible={false}><Wreck /></group>
+      </group>
+      <group ref={bar} position={[0, 3.9, 0]}>
+        <mesh><planeGeometry args={[2.5, 0.28]} /><meshBasicMaterial color="#1a1210" transparent opacity={0.75} depthTest={false} /></mesh>
+        <mesh ref={fill} position={[0, 0, 0.01]}><planeGeometry args={[2.4, 0.18]} /><meshBasicMaterial color="#e8553f" depthTest={false} /></mesh>
+      </group>
+    </group>
+  );
+}
+
+const MISSILE_SLOTS = 8;
+
+/** Missiles in flight: a slim body with a hot nose, one mesh per slot, parked out of sight when unused. */
+function Missiles({ live }: { live: MutableRefObject<CombatSnapshot> }) {
+  const slots = useRef<(Group | null)[]>([]);
+  useFrame(() => {
+    const flying = live.current.missiles;
+    for (let i = 0; i < MISSILE_SLOTS; i += 1) {
+      const slot = slots.current[i];
+      const m = flying[i];
+      if (!slot) continue;
+      slot.visible = m !== undefined;
+      if (m) { slot.position.set(m.x, 1.3, m.z); slot.rotation.set(0, m.heading, 0); }
+    }
+  });
+  return (
+    <>
+      {Array.from({ length: MISSILE_SLOTS }, (_, i) => (
+        <group key={i} ref={(g) => { slots.current[i] = g; }} visible={false}>
+          <mesh rotation-x={Math.PI / 2}><cylinderGeometry args={[0.14, 0.14, 1.5, 8]} /><meshStandardMaterial color="#e9edf0" metalness={0.4} roughness={0.4} /></mesh>
+          <mesh position={[0, 0, 0.9]} rotation-x={Math.PI / 2}><coneGeometry args={[0.14, 0.4, 8]} /><meshStandardMaterial color="#d8412f" emissive="#d8412f" emissiveIntensity={0.8} /></mesh>
+          <mesh position={[0, 0, -0.85]}><sphereGeometry args={[0.2, 6, 4]} /><meshBasicMaterial color="#ffb347" /></mesh>
+        </group>
+      ))}
+    </>
+  );
+}
+
+/** Pickup pads: a glowing ring on the road and a spinning icon, dimmed while the pad recharges. */
+function Pickups({ match, live }: { match: CombatAuthority; live: MutableRefObject<CombatSnapshot> }) {
+  const pads = match.layout.pads;
+  const icons = useRef<(Group | null)[]>([]);
+  const rings = useRef<(Mesh | null)[]>([]);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    pads.forEach((pad, i) => {
+      const ready = live.current.pickups.find((p) => p.id === pad.id)?.ready ?? true;
+      const icon = icons.current[i];
+      const ring = rings.current[i];
+      if (icon) { icon.visible = ready; icon.rotation.y = t * 1.6; icon.position.y = 2.2 + Math.sin(t * 2.4 + i) * 0.25; }
+      if (ring) { ring.scale.setScalar(ready ? 1 + Math.sin(t * 3 + i) * 0.04 : 0.85); (ring.material as { opacity: number }).opacity = ready ? 0.85 : 0.2; }
+    });
+  });
+  return (
+    <>
+      {pads.map((pad, i) => {
+        const health = pad.kind === "health";
+        const tone = health ? "#53e08a" : "#ffb340";
+        return (
+          <group key={pad.id} position={[pad.x, 0, pad.z]}>
+            <mesh ref={(m) => { rings.current[i] = m; }} rotation-x={-Math.PI / 2} position={[0, 0.12, 0]}>
+              <ringGeometry args={[CITY_PAD_RADIUS - 0.5, CITY_PAD_RADIUS, 40]} /><meshBasicMaterial color={tone} transparent opacity={0.85} depthWrite={false} />
+            </mesh>
+            <group ref={(g) => { icons.current[i] = g; }} position={[0, 2.2, 0]}>
+              {health ? (
+                <>
+                  <mesh><boxGeometry args={[1.5, 0.45, 0.45]} /><meshBasicMaterial color={tone} /></mesh>
+                  <mesh><boxGeometry args={[0.45, 1.5, 0.45]} /><meshBasicMaterial color={tone} /></mesh>
+                </>
+              ) : (
+                <>
+                  <mesh><boxGeometry args={[0.8, 0.8, 0.8]} /><meshBasicMaterial color={tone} /></mesh>
+                  <mesh position={[0, 0.75, 0]}><coneGeometry args={[0.45, 0.8, 4]} /><meshBasicMaterial color="#fff3d1" /></mesh>
+                </>
+              )}
+            </group>
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+/** The missile lock: a red ring that follows the locked car, so the lock is obvious in the street. */
+function LockReticle({ live }: { live: MutableRefObject<CombatSnapshot> }) {
+  const ring = useRef<Mesh>(null);
+  useFrame(({ camera, clock }) => {
+    const r = ring.current;
+    if (!r) return;
+    const snapshot = live.current;
+    const me = snapshot.vehicles[0]!;
+    const target = me.alive && me.lockId ? snapshot.vehicles.find((v) => v.playerId === me.lockId && v.alive) : undefined;
+    r.visible = target !== undefined;
+    if (!target) return;
+    r.position.set(target.x, 1.6, target.z);
+    r.quaternion.copy(camera.quaternion);
+    r.rotateZ(clock.elapsedTime * 2);
+    r.scale.setScalar(1 + Math.sin(clock.elapsedTime * 10) * 0.08);
+  });
+  return <mesh ref={ring} visible={false} renderOrder={7}><torusGeometry args={[2.6, 0.1, 6, 4]} /><meshBasicMaterial color="#ff3b2e" depthTest={false} transparent opacity={0.95} /></mesh>;
 }
 
 /** The sun follows the car so one small, sharp shadow map covers what is on screen. */
@@ -463,21 +621,24 @@ function Attribution({ source }: { source: CityData["source"] }) {
 
 export interface CitySceneProps {
   city: CityData;
-  world: CityAuthority;
-  held: RefObject<Held>;
-  color: string;
+  match: CombatAuthority;
+  /** Simulation events on their way to the effects. */
+  bus: MutableRefObject<EffectsBus>;
+  /** Body colour by vehicle kind. */
+  colors: Record<string, string>;
   maxSpeed: number;
-  speedo: RefObject<HTMLElement | null>;
 }
 
-/** The real-city 3D view: merged city meshes, the original car, a chase camera and OpenStreetMap attribution. */
-export function CityScene({ city, world, held, color, maxSpeed, speedo }: CitySceneProps) {
+/** The real-city combat view: merged city meshes, the fighters, pickups, missiles and effects, a chase camera and OpenStreetMap attribution. */
+export function CityScene({ city, match, bus, colors, maxSpeed }: CitySceneProps) {
   const coarse = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   const [level, setLevel] = useState(coarse ? 1 : 2);
   const [lost, setLost] = useState(false);
   const [epoch, setEpoch] = useState(0);
-  const start = world.snapshot().vehicles[0]!;
+  const start = match.snapshot().vehicles[0]!;
   const pose = useRef<ChaseTarget>({ x: start.x, z: start.z, heading: start.heading, speed: 0 });
+  const live = useRef<CombatSnapshot>(match.snapshot());
+  const fleet = useMemo<FleetEntry[]>(() => match.snapshot().vehicles.map((v) => ({ id: v.playerId, kind: v.kind, bot: v.bot })), [match]);
   const materials = useMemo(() => createCityMaterials(), []);
   useEffect(() => () => materials.dispose(), [materials]);
   return (
@@ -497,8 +658,13 @@ export function CityScene({ city, world, held, color, maxSpeed, speedo }: CitySc
             <Sun pose={pose} shadowSize={QUALITY_LEVELS[level]!.shadow} />
             <SkyDome materials={materials} />
             <CityMeshes city={city} materials={materials} />
-            <Driver world={world} held={held} color={color} pose={pose} speedo={speedo} maxSpeed={maxSpeed} />
+            <Hub match={match} live={live} pose={pose} />
+            {fleet.map((entry) => <Fighter key={entry.id} live={live} entry={entry} color={colors[entry.kind] ?? "#cccccc"} />)}
+            <Pickups match={match} live={live} />
+            <Missiles live={live} />
+            <LockReticle live={live} />
             <ChaseCamera car={pose} maxSpeed={maxSpeed} />
+            <CombatEffects live={live} bus={bus} />
             <QualityGovernor level={level} onLevel={setLevel} />
           </Canvas>
         )}

@@ -1,8 +1,9 @@
-import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Component, lazy, Suspense, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type { CityData } from "../maps/city-compiler";
-import { createCityWorld, loadCity, CITY_SPEED_SCALE } from "../maps/midtown";
+import { CITY_SPEED_SCALE } from "../maps/midtown";
 import { VEHICLE_SPECS } from "../sim/arena";
-import type { Held } from "./TouchControls";
+import type { CombatAuthority } from "../sim/contracts";
+import type { EffectsBus } from "./CombatEffects";
 
 export const VEHICLES = [
   { id: "switchback", name: "Switchback", role: "All-rounder", color: "#e88b43", speed: 3, armor: 3 },
@@ -32,8 +33,6 @@ export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {
 
 const CityScene = lazy(() => import("./CityScene").then((m) => ({ default: m.CityScene })));
 
-const CITY_SEED = 20261124;
-
 /** Three.js needs WebGL; without it (an old browser, a test DOM) the city view shows a plain message instead. */
 function webglAvailable(): boolean {
   return typeof WebGL2RenderingContext !== "undefined" || typeof WebGLRenderingContext !== "undefined";
@@ -52,44 +51,19 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
 const noteStyle: CSSProperties = { margin: 0, padding: "1rem", textAlign: "center", color: "#d8e0d0" };
 const stageStyle: CSSProperties = { position: "relative", width: "100%", aspectRatio: "16 / 10", minHeight: 260, maxHeight: "70vh", background: "#b9c7d4", borderRadius: 12, overflow: "hidden", border: "2px solid #47604c" };
 
-type CityState = { status: "loading" } | { status: "ready"; city: CityData } | { status: "error"; message: string };
+const COLORS: Record<string, string> = Object.fromEntries(VEHICLES.map((v) => [v.id, v.color]));
 
 /**
- * Third-person drive through the compiled Midtown city. The city file is loaded here with
- * `loadCity(`, the car runs on the fixed-tick city world, and the 3D view is loaded on demand.
+ * The 3D view of a running city combat match. The match itself is owned and ticked by the caller;
+ * this only draws it, loading the 3D code on demand and falling back to a message without WebGL.
  */
-export function CityDrive({ vehicle, held }: { vehicle: Vehicle; held: RefObject<Held> }) {
+export function CityBattle({ city, match, bus, vehicle }: { city: CityData; match: CombatAuthority; bus: MutableRefObject<EffectsBus>; vehicle: Vehicle }) {
   const [webgl] = useState(webglAvailable);
-  const [state, setState] = useState<CityState>({ status: "loading" });
-  const speedo = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!webgl) return undefined;
-    let live = true;
-    loadCity()
-      .then((city) => { if (live) setState({ status: "ready", city }); })
-      .catch((error: unknown) => { if (live) setState({ status: "error", message: error instanceof Error ? error.message : "The city could not be loaded." }); });
-    return () => { live = false; };
-  }, [webgl]);
-
-  const world = useMemo(() => (state.status === "ready" ? createCityWorld(state.city, { seed: CITY_SEED, vehicle: vehicle.id }) : null), [state, vehicle.id]);
-  useEffect(() => () => world?.dispose(), [world]);
-
   const maxSpeed = VEHICLE_SPECS[vehicle.id].maxSpeed * CITY_SPEED_SCALE;
-  let body: ReactNode;
-  if (!webgl) body = <p role="status" style={noteStyle}>The 3D city needs WebGL, which this browser is not offering. The garage and arena below still work.</p>;
-  else if (state.status === "error") body = <p role="alert" style={noteStyle}>Midtown could not be loaded: {state.message} Reload the page to try again.</p>;
-  else if (!world || state.status !== "ready") body = <p role="status" style={noteStyle}>Loading Midtown…</p>;
-  else {
-    body = <SceneBoundary><Suspense fallback={<p role="status" style={noteStyle}>Loading the 3D view…</p>}>
-      <CityScene city={state.city} world={world} held={held} color={vehicle.color} maxSpeed={maxSpeed} speedo={speedo} />
-    </Suspense></SceneBoundary>;
-  }
-  return <section className="city-drive" aria-label="Midtown drive" style={{ margin: "1rem 0" }}>
-    <div style={stageStyle}>
-      {body}
-      {world && <span ref={speedo} aria-label="Speed" style={{ position: "absolute", left: 12, top: 10, fontWeight: 700, fontSize: 20, color: "#fff", textShadow: "0 1px 3px #000" }}>0 km/h</span>}
-      {world && <button type="button" onClick={() => world.reset()} style={{ position: "absolute", right: 12, top: 10, minHeight: 36, padding: "6px 10px" }}>Reset car</button>}
-    </div>
-  </section>;
+  const body: ReactNode = webgl
+    ? <SceneBoundary><Suspense fallback={<p role="status" style={noteStyle}>Loading the 3D view…</p>}>
+      <CityScene key={vehicle.id} city={city} match={match} bus={bus} colors={COLORS} maxSpeed={maxSpeed} />
+    </Suspense></SceneBoundary>
+    : <p role="status" style={noteStyle}>The 3D city needs WebGL, which this browser is not offering. The match still runs; the garage below still works.</p>;
+  return <div className="city-battle" style={stageStyle}>{body}</div>;
 }
