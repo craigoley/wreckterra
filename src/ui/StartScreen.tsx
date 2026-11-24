@@ -170,7 +170,14 @@ function webglAvailable(): boolean {
 
 /** The real map: MapLibre GL with OpenFreeMap's liberty style (no API key), loaded on demand. */
 export const createMapLibreMap: MapFactory = async (element, options) => {
-  const [{ Map: MapLibreMap, Marker }] = await Promise.all([import("maplibre-gl"), import("maplibre-gl/dist/maplibre-gl.css")]);
+  const [{ Map: MapLibreMap, Marker, setWorkerUrl }, worker] = await Promise.all([
+    import("maplibre-gl"),
+    // MapLibre 6 looks for its worker beside its own module; once bundled, that file is not there, so hand it the
+    // worker Vite emitted as an asset.
+    import("maplibre-gl/dist/maplibre-gl-worker.mjs?url"),
+    import("maplibre-gl/dist/maplibre-gl.css"),
+  ]);
+  setWorkerUrl(worker.default);
   const map = new MapLibreMap({
     container: element,
     style: MAP_STYLE_URL,
