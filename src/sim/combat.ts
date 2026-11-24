@@ -1,11 +1,12 @@
-import { ARENA, SPAWNS, VEHICLE_KINDS, VEHICLE_SPECS, rayCover } from "./arena";
-import { createBotBrain, type BotBrain, type BotCommand } from "./bots";
+import { ARENA, SPAWNS, VEHICLE_KINDS, VEHICLE_SPECS, rayCover, type Spawn } from "./arena";
+import { createBotBrain, createStreetNav, type BotBrain, type BotCommand, type BotNav } from "./bots";
 import {
   CONTRACT_VERSION,
   MAX_STEPS_PER_ADVANCE,
   TICK_RATE,
   TICK_SECONDS,
   type CombatAuthority,
+  type CombatArenaLayout,
   type CombatSnapshot,
   type CombatVehicleState,
   type InputCommand,
@@ -14,12 +15,16 @@ import {
   type MatchReason,
   type MatchStatus,
   type MissileState,
+  type PickupKind,
+  type PickupPad,
   type PickupState,
   type SimEvent,
   type VehicleKind,
   type WeaponKind,
 } from "./contracts";
-import { createRng, resolveBox } from "./world";
+import { CITY_ACCEL_SCALE, CITY_SPEED_SCALE, CAR_HIT_RADIUS, hitCircles } from "../maps/midtown";
+import type { Bounds, CityData } from "../maps/city-compiler";
+import { createCityGeometry, createRng, resolveBox, type CityGeometry } from "./world";
 
 export const MATCH_SECONDS = 300;
 export const MATCH_TICKS = MATCH_SECONDS * TICK_RATE;
@@ -77,11 +82,155 @@ interface Rocket extends MissileState {
 }
 
 interface Car extends CombatVehicleState {
+  /** Velocity in the city model, where a car slides; unused in the flat arena. */
+  vx: number;
+  vz: number;
+  offRoad: boolean;
   gunCooldown: number;
   missileCooldown: number;
   prevMissile: boolean;
   prevSpecial: boolean;
   impacted: boolean;
+}
+
+/* ---------------------------------------------------------------- where a match is fought */
+
+/** A pickup pad is this wide in a city, where a car crosses a junction in a blink. */
+export const CITY_PAD_RADIUS = 4;
+const CITY_PICKUPS = 4;
+const CITY_BOT_POOL = 6;
+const CITY_BOT_MIN_GAP = 60;
+const CITY_DRAG = 0.35;
+const CITY_OFFROAD_DRAG = 1.6;
+const CITY_OFFROAD_SPEED_KEPT = 0.6;
+const CITY_BRAKE_DECELERATION = 38;
+const GRIP_RATE = 7;
+const DRIFT_GRIP_RATE = 1.4;
+const HIT_OFFSET = 1.15;
+const RESTITUTION = 0.25;
+const CONTACT_FRICTION = 0.92;
+
+interface CityPlace { geometry: CityGeometry; bounds: Bounds }
+
+/** Everything that differs between the flat arena and a city: walls, spawns, pads and bot sight. */
+interface Place {
+  layout: CombatArenaLayout;
+  padRadius: number;
+  /** Start positions: the player's first, then one per bot. Draws from the match generator. */
+  spawns(rng: () => number, botCount: number): Spawn[];
+  /** Distance along a unit ray to the first wall, Infinity when open. */
+  cover(ox: number, oz: number, dx: number, dz: number): number;
+  /** True where a missile bursts on solid ground. */
+  solid(x: number, z: number): boolean;
+  /** Push a shoved car back out of walls. */
+  settle(car: { x: number; z: number }): void;
+  nav?: BotNav;
+  city?: CityPlace;
+}
+
+function arenaPlace(): Place {
+  const layout = ARENA;
+  return {
+    layout,
+    padRadius: PAD_RADIUS,
+    spawns(rng) {
+      // The seed decides which spawn each bot takes.
+      const slots = [1, 2, 3, 4];
+      for (let i = slots.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(rng() * (i + 1));
+        [slots[i], slots[j]] = [slots[j]!, slots[i]!];
+      }
+      return [SPAWNS[0]!, ...slots.map((slot) => SPAWNS[slot]!)];
+    },
+    cover: (ox, oz, dx, dz) => rayCover(layout, ox, oz, dx, dz),
+    solid: (x, z) =>
+      Math.abs(x) >= layout.halfExtent ||
+      Math.abs(z) >= layout.halfExtent ||
+      layout.obstacles.some((o) => Math.abs(x - o.x) <= o.halfX && Math.abs(z - o.z) <= o.halfZ),
+    settle(car) {
+      for (const box of layout.obstacles) resolveBox(car, box, VEHICLE_RADIUS);
+      car.x = Math.max(-layout.halfExtent + VEHICLE_RADIUS, Math.min(layout.halfExtent - VEHICLE_RADIUS, car.x));
+      car.z = Math.max(-layout.halfExtent + VEHICLE_RADIUS, Math.min(layout.halfExtent - VEHICLE_RADIUS, car.z));
+    },
+  };
+}
+
+/** Pickups sit on street junctions, spread across the district: the busiest crossing first. */
+function cityPads(city: CityData): PickupPad[] {
+  const neighbours = new Map<number, Set<number>>();
+  for (const e of city.graph.edges) {
+    for (const [a, b] of [[e.from, e.to], [e.to, e.from]] as const) neighbours.set(a, (neighbours.get(a) ?? new Set<number>()).add(b));
+  }
+  const nodes = city.graph.nodes.map((node, index) => ({ node, index, degree: neighbours.get(index)?.size ?? 0 }));
+  let pool = nodes.filter((n) => n.degree >= 3);
+  if (pool.length < CITY_PICKUPS) pool = nodes.filter((n) => n.degree >= 2);
+  pool = pool.sort((a, b) => Math.hypot(a.node.x, a.node.z) - Math.hypot(b.node.x, b.node.z) || a.index - b.index);
+  const chosen: typeof pool = [];
+  while (chosen.length < Math.min(CITY_PICKUPS, pool.length)) {
+    let best = pool[0]!;
+    let bestGap = -1;
+    for (const candidate of pool) {
+      if (chosen.includes(candidate)) continue;
+      const gap = chosen.length === 0 ? 0 : Math.min(...chosen.map((c) => Math.hypot(c.node.x - candidate.node.x, c.node.z - candidate.node.z)));
+      if (chosen.length === 0 || gap > bestGap) { best = candidate; bestGap = gap; }
+      if (chosen.length === 0) break;
+    }
+    chosen.push(best);
+  }
+  return chosen.map((c, k): PickupPad => {
+    const kind: PickupKind = k % 2 === 0 ? "health" : "ammo";
+    return { id: `${kind}-${c.index}`, kind, x: c.node.x, z: c.node.z };
+  });
+}
+
+function cityPlace(city: CityData): Place {
+  const geometry = createCityGeometry(city);
+  const { bounds } = city;
+  const layout: CombatArenaLayout = {
+    halfExtent: Math.max(Math.abs(bounds.minX), Math.abs(bounds.maxX), Math.abs(bounds.minZ), Math.abs(bounds.maxZ)),
+    obstacles: city.buildings.map((b) => {
+      const xs = b.footprint.map((p) => p[0]);
+      const zs = b.footprint.map((p) => p[1]);
+      const [minX, maxX, minZ, maxZ] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
+      return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, halfX: (maxX - minX) / 2, halfZ: (maxZ - minZ) / 2 };
+    }),
+    ramps: [],
+    pads: cityPads(city),
+  };
+  const margin = HIT_OFFSET + CAR_HIT_RADIUS;
+  const inside = (x: number, z: number): boolean => x > bounds.minX && x < bounds.maxX && z > bounds.minZ && z < bounds.maxZ;
+  return {
+    layout,
+    padRadius: CITY_PAD_RADIUS,
+    spawns(rng, botCount) {
+      const pool: Spawn[] = city.spawns.length > 0 ? city.spawns : [{ x: 0, z: 0, heading: 0 }];
+      const player = pool[0]!;
+      // Bots start on streets near the player, but not on top of them: a fight within seconds, not at once.
+      const gap = (s: Spawn): number => Math.hypot(s.x - player.x, s.z - player.z);
+      const all = pool.slice(1).sort((a, b) => gap(a) - gap(b));
+      const apart = all.filter((s) => gap(s) >= CITY_BOT_MIN_GAP);
+      const others = apart.length >= botCount ? apart : all;
+      const near = others.slice(0, Math.max(botCount, Math.min(CITY_BOT_POOL, others.length)));
+      for (let i = near.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(rng() * (i + 1));
+        [near[i], near[j]] = [near[j]!, near[i]!];
+      }
+      return [player, ...Array.from({ length: botCount }, (_, i) => near[i] ?? pool[(i + 1) % pool.length]!)];
+    },
+    cover: geometry.rayCover,
+    solid: (x, z) => !inside(x, z) || geometry.solidAt(x, z),
+    settle(car) {
+      for (let pass = 0; pass < 3; pass += 1) {
+        const contacts = geometry.contacts(car.x, car.z, VEHICLE_RADIUS);
+        for (const c of contacts) { car.x += c.nx * c.depth; car.z += c.nz * c.depth; }
+        if (contacts.length === 0) break;
+      }
+      car.x = Math.max(bounds.minX + margin, Math.min(bounds.maxX - margin, car.x));
+      car.z = Math.max(bounds.minZ + margin, Math.min(bounds.maxZ - margin, car.z));
+    },
+    nav: createStreetNav(city, geometry),
+    city: { geometry, bounds },
+  };
 }
 
 function isOptionalBoolean(value: unknown): boolean {
@@ -121,10 +270,23 @@ function validate(raw: unknown): { ok: true; input: InputCommand } | { ok: false
  * React, DOM or timers, so a test, a render loop or a later server tick produce identical results.
  */
 export function createCombatMatch(options: CombatOptions): CombatAuthority {
+  return createMatch(arenaPlace(), options);
+}
+
+/**
+ * Create one deterministic, seeded combat match in a compiled city: the player and the bots start on
+ * road spawns, drive with footprint collision, and buildings block shots, locks and missiles. The
+ * weapons, ammo, pickups, five-minute limit and win and loss rules are the arena's, unchanged.
+ */
+export function createCityMatch(city: CityData, options: CombatOptions): CombatAuthority {
+  return createMatch(cityPlace(city), options);
+}
+
+function createMatch(place: Place, options: CombatOptions): CombatAuthority {
   const { seed } = options;
   const playerKind = options.playerVehicle ?? "switchback";
   const botCount = Math.max(0, Math.min(MAX_BOTS, Math.floor(options.bots ?? MAX_BOTS)));
-  const layout = ARENA;
+  const layout = place.layout;
 
   let rng = createRng(seed);
   let cars: Car[] = [];
@@ -146,11 +308,10 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
     if (events.length > EVENT_CAP) events.splice(0, events.length - EVENT_CAP);
   }
 
-  function makeCar(playerId: string, kind: VehicleKind, bot: boolean, spawnIndex: number): Car {
+  function makeCar(playerId: string, kind: VehicleKind, bot: boolean, spawn: Spawn): Car {
     const spec = VEHICLE_SPECS[kind];
-    const spawn = SPAWNS[spawnIndex];
     return {
-      playerId, x: spawn.x, z: spawn.z, heading: spawn.heading, speed: 0,
+      playerId, x: spawn.x, z: spawn.z, heading: spawn.heading, speed: 0, vx: 0, vz: 0, offRoad: false,
       kind, bot, health: spec.maxHealth, maxHealth: spec.maxHealth, alive: true,
       missiles: MISSILE_START_AMMO, maxMissiles: MISSILE_MAX_AMMO,
       special: spec.special, specialCooldown: 0, lockId: null,
@@ -171,16 +332,12 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
     events = [];
     input = { v: CONTRACT_VERSION, tick: 0, playerId: PLAYER_ID, steer: 0, throttle: 0, brake: false, fire: false, missile: false, special: false };
     // The seed decides which spawn each bot takes and which vehicle it drives.
-    const slots = [1, 2, 3, 4];
-    for (let i = slots.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(rng() * (i + 1));
-      [slots[i], slots[j]] = [slots[j], slots[i]];
-    }
-    cars = [makeCar(PLAYER_ID, playerKind, false, 0)];
+    const starts = place.spawns(rng, botCount);
+    cars = [makeCar(PLAYER_ID, playerKind, false, starts[0]!)];
     brains = [null];
     for (let i = 0; i < botCount; i += 1) {
-      const kind = VEHICLE_KINDS[Math.floor(rng() * VEHICLE_KINDS.length)];
-      cars.push(makeCar(`bot-${i + 1}`, kind, true, slots[i]));
+      const kind = VEHICLE_KINDS[Math.floor(rng() * VEHICLE_KINDS.length)]!;
+      cars.push(makeCar(`bot-${i + 1}`, kind, true, starts[i + 1]!));
       brains.push(createBotBrain(seed + 7919 * (i + 1)));
     }
     pickups = layout.pads.map((pad) => ({ ...pad, ready: true, respawnTicks: 0 }));
@@ -212,10 +369,77 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
     if (!car.bot) {
       return { steer: input.steer, throttle: input.throttle, brake: input.brake, fire: input.fire === true, missile: input.missile === true, special: input.special === true };
     }
-    return brains[index]!.think({ self: car, vehicles: cars, pickups, layout, tick });
+    return brains[index]!.think({ self: car, vehicles: cars, pickups, layout, tick, nav: place.nav });
+  }
+
+  /** A city car slides: steering turns the nose, the velocity lags it, and buildings are solid. */
+  function driveCity(car: Car, command: BotCommand, ground: CityPlace): void {
+    const spec = VEHICLE_SPECS[car.kind];
+    const boosting = car.boost > 0;
+    const maxSpeed = spec.maxSpeed * CITY_SPEED_SCALE * (boosting ? 1.6 : 1);
+    const acceleration = spec.acceleration * CITY_ACCEL_SCALE * (boosting ? 2 : 1);
+    const dt = TICK_SECONDS;
+    const fx = Math.sin(car.heading);
+    const fz = Math.cos(car.heading);
+    let forward = car.vx * fx + car.vz * fz;
+    let lateral = car.vx * fz - car.vz * fx;
+    forward += command.throttle * acceleration * dt;
+    if (command.brake) {
+      const slowed = CITY_BRAKE_DECELERATION * dt;
+      forward = Math.abs(forward) <= slowed ? 0 : forward - Math.sign(forward) * slowed;
+    }
+    forward -= forward * (CITY_DRAG + (car.offRoad ? CITY_OFFROAD_DRAG : 0)) * dt;
+    forward = Math.max(-maxSpeed * 0.4, Math.min(maxSpeed * (car.offRoad ? CITY_OFFROAD_SPEED_KEPT : 1), forward));
+    const authority = Math.max(-1, Math.min(1, forward / (maxSpeed * 0.25)));
+    car.heading -= command.steer * spec.turnRate * authority * dt;
+    lateral *= Math.exp(-(command.brake ? DRIFT_GRIP_RATE : GRIP_RATE) * dt);
+    const nfx = Math.sin(car.heading);
+    const nfz = Math.cos(car.heading);
+    car.vx = nfx * forward + nfz * lateral;
+    car.vz = nfz * forward - nfx * lateral;
+    car.x += car.vx * dt;
+    car.z += car.vz * dt;
+
+    let hit = false;
+    let impactSpeed = 0;
+    for (let pass = 0; pass < 3; pass += 1) {
+      let moved = false;
+      for (const [cx, cz] of hitCircles(car.x, car.z, car.heading)) {
+        for (const contact of ground.geometry.contacts(cx, cz, CAR_HIT_RADIUS)) {
+          car.x += contact.nx * contact.depth;
+          car.z += contact.nz * contact.depth;
+          const vn = car.vx * contact.nx + car.vz * contact.nz;
+          if (vn < 0) {
+            car.vx -= (1 + RESTITUTION) * vn * contact.nx;
+            car.vz -= (1 + RESTITUTION) * vn * contact.nz;
+            impactSpeed = Math.max(impactSpeed, -vn);
+          }
+          car.vx *= CONTACT_FRICTION;
+          car.vz *= CONTACT_FRICTION;
+          moved = true;
+          hit = true;
+        }
+      }
+      if (!moved) break;
+    }
+    // The district edge is a wall too.
+    const { bounds } = ground;
+    const m = HIT_OFFSET + CAR_HIT_RADIUS;
+    if (car.x < bounds.minX + m) { car.x = bounds.minX + m; car.vx = Math.max(0, car.vx); hit = true; }
+    if (car.x > bounds.maxX - m) { car.x = bounds.maxX - m; car.vx = Math.min(0, car.vx); hit = true; }
+    if (car.z < bounds.minZ + m) { car.z = bounds.minZ + m; car.vz = Math.max(0, car.vz); hit = true; }
+    if (car.z > bounds.maxZ - m) { car.z = bounds.maxZ - m; car.vz = Math.min(0, car.vz); hit = true; }
+    if (hit && !car.impacted && impactSpeed >= IMPACT_MIN_SPEED) {
+      emit({ v: CONTRACT_VERSION, tick, kind: "impact", playerId: car.playerId, speed: impactSpeed });
+    }
+    car.impacted = hit;
+    if (car.boost > 0) car.boost -= 1;
+    car.speed = car.vx * Math.sin(car.heading) + car.vz * Math.cos(car.heading);
+    car.offRoad = !ground.geometry.onRoad(car.x, car.z);
   }
 
   function drive(car: Car, command: BotCommand): void {
+    if (place.city) return driveCity(car, command, place.city);
     const spec = VEHICLE_SPECS[car.kind];
     const boosting = car.boost > 0;
     const maxSpeed = spec.maxSpeed * (boosting ? 1.6 : 1) * (car.airborne > 0 ? 1.1 : 1);
@@ -287,6 +511,8 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
         b.z += nz * push;
         a.speed *= 0.9;
         b.speed *= 0.9;
+        a.vx *= 0.9; a.vz *= 0.9;
+        b.vx *= 0.9; b.vz *= 0.9;
       }
     }
   }
@@ -297,7 +523,7 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
     const fz = Math.cos(car.heading);
     const angleTo = (other: Car): number => Math.abs(Math.atan2(fx * (other.z - car.z) - fz * (other.x - car.x), fx * (other.x - car.x) + fz * (other.z - car.z)));
     const visible = (other: Car): boolean => other.alive && other.playerId !== car.playerId && Math.hypot(other.x - car.x, other.z - car.z) <= LOCK_RANGE
-      && rayCover(layout, car.x, car.z, other.x - car.x, other.z - car.z) >= Math.hypot(other.x - car.x, other.z - car.z);
+      && place.cover(car.x, car.z, other.x - car.x, other.z - car.z) >= Math.hypot(other.x - car.x, other.z - car.z);
     const kept = carById(car.lockId);
     if (kept && visible(kept) && angleTo(kept) <= LOCK_KEEP_CONE) return;
     let best: Car | null = null;
@@ -319,7 +545,7 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
     const dz = Math.cos(heading);
     const ox = car.x + dx * 1.5;
     const oz = car.z + dz * 1.5;
-    const cover = rayCover(layout, ox, oz, dx, dz);
+    const cover = place.cover(ox, oz, dx, dz);
     let reach = Math.min(GUN_RANGE, cover);
     let victim: Car | null = null;
     for (const other of cars) {
@@ -361,9 +587,7 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
         const nz = d > 1e-6 ? (other.z - car.z) / d : 0;
         other.x += nx * 2.5;
         other.z += nz * 2.5;
-        for (const box of layout.obstacles) resolveBox(other, box, VEHICLE_RADIUS);
-        other.x = Math.max(-layout.halfExtent + VEHICLE_RADIUS, Math.min(layout.halfExtent - VEHICLE_RADIUS, other.x));
-        other.z = Math.max(-layout.halfExtent + VEHICLE_RADIUS, Math.min(layout.halfExtent - VEHICLE_RADIUS, other.z));
+        place.settle(other);
         damage(other, SHOCKWAVE_DAMAGE, car.playerId, "special", other.x, other.z);
       }
     }
@@ -403,10 +627,7 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
           break;
         }
       }
-      const blocked =
-        Math.abs(missile.x) >= layout.halfExtent ||
-        Math.abs(missile.z) >= layout.halfExtent ||
-        layout.obstacles.some((o) => Math.abs(missile.x - o.x) <= o.halfX && Math.abs(missile.z - o.z) <= o.halfZ);
+      const blocked = place.solid(missile.x, missile.z);
       if (direct || blocked || missile.age >= MISSILE_LIFE_TICKS) explode(missile, direct);
       else remaining.push(missile);
     }
@@ -425,7 +646,7 @@ export function createCombatMatch(options: CombatOptions): CombatAuthority {
         continue;
       }
       for (const car of cars) {
-        if (!car.alive || Math.hypot(car.x - pad.x, car.z - pad.z) > PAD_RADIUS) continue;
+        if (!car.alive || Math.hypot(car.x - pad.x, car.z - pad.z) > place.padRadius) continue;
         if (pad.kind === "health" ? car.health >= car.maxHealth : car.missiles >= car.maxMissiles) continue;
         if (pad.kind === "health") car.health = Math.min(car.maxHealth, car.health + HEALTH_PICKUP);
         else car.missiles = Math.min(car.maxMissiles, car.missiles + AMMO_PICKUP);

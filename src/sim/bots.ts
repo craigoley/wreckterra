@@ -1,6 +1,22 @@
 import { lineClear } from "./arena";
 import type { CombatArenaLayout, CombatVehicleState, PickupState } from "./contracts";
-import { createRng } from "./world";
+import type { CityData } from "../maps/city-compiler";
+import { createRng, type CityGeometry } from "./world";
+
+/** What a bot needs to know about a city: where the streets lead and what a building hides. */
+export interface BotNav {
+  /** No building wall lies on the straight line between two points. */
+  clear(ax: number, az: number, bx: number, bz: number): boolean;
+  /** A point inside the district and at least `margin` metres from every building. */
+  open(x: number, z: number, margin: number): boolean;
+  /**
+   * The next point to steer for when travelling by street from one place to another, or null with no
+   * route. Given the car's heading, a junction behind it costs a U-turn's worth of extra distance.
+   */
+  waypoint(x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number } | null;
+  /** A street spot near (x, z) that a threat at (tx, tz) cannot see, or null when there is none. */
+  coverSpot(x: number, z: number, tx: number, tz: number): { x: number; z: number } | null;
+}
 
 export interface BotView {
   self: CombatVehicleState;
@@ -8,6 +24,8 @@ export interface BotView {
   pickups: readonly PickupState[];
   layout: CombatArenaLayout;
   tick: number;
+  /** Present in a city match: bots then route by street and see buildings as cover. */
+  nav?: BotNav;
 }
 
 export interface BotCommand {
@@ -44,6 +62,122 @@ function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, value));
 }
 
+/** A waypoint counts as reached inside this distance, so a bot turns the corner instead of circling it. */
+const REACH_M = 11;
+const COVER_SEARCH_M = 140;
+/** Extra road distance charged for a first junction that lies behind the car. */
+const U_TURN_M = 60;
+const INF = Number.POSITIVE_INFINITY;
+
+/**
+ * Street routing for a city match. Streets are treated as two-way (a wreck-fest ignores one-way
+ * signs), all-pairs shortest paths are precomputed once, and a trip is snapped onto the nearest
+ * street segment at both ends, so asking for the next waypoint is a handful of lookups.
+ */
+export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav {
+  const nodes = city.graph.nodes;
+  const count = nodes.length;
+  const dist: number[][] = Array.from({ length: count }, (_, i) => Array.from({ length: count }, (_, j) => (i === j ? 0 : INF)));
+  const next: number[][] = Array.from({ length: count }, () => Array.from({ length: count }, () => -1));
+  const seen = new Set<string>();
+  const segments: { a: number; b: number }[] = [];
+  for (const e of city.graph.edges) {
+    const key = e.from < e.to ? `${e.from}-${e.to}` : `${e.to}-${e.from}`;
+    if (e.from === e.to || seen.has(key)) continue;
+    seen.add(key);
+    segments.push({ a: e.from, b: e.to });
+    dist[e.from]![e.to] = e.length;
+    dist[e.to]![e.from] = e.length;
+    next[e.from]![e.to] = e.to;
+    next[e.to]![e.from] = e.from;
+  }
+  for (let k = 0; k < count; k += 1) {
+    for (let i = 0; i < count; i += 1) {
+      for (let j = 0; j < count; j += 1) {
+        if (dist[i]![k]! + dist[k]![j]! < dist[i]![j]!) {
+          dist[i]![j] = dist[i]![k]! + dist[k]![j]!;
+          next[i]![j] = next[i]![k]!;
+        }
+      }
+    }
+  }
+
+  const snap = (x: number, z: number): { seg: number; x: number; z: number } => {
+    let best = { seg: -1, x, z };
+    let bestD = INF;
+    segments.forEach((s, i) => {
+      const a = nodes[s.a]!;
+      const b = nodes[s.b]!;
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len2 = dx * dx + dz * dz;
+      const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+      const px = a.x + dx * t;
+      const pz = a.z + dz * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d < bestD) { bestD = d; best = { seg: i, x: px, z: pz }; }
+    });
+    return best;
+  };
+
+  const route = (x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number }[] | null => {
+    const from = snap(x, z);
+    const to = snap(gx, gz);
+    if (from.seg < 0 || to.seg < 0) return null;
+    if (from.seg === to.seg) return [{ x: to.x, z: to.z }];
+    let bestCost = INF;
+    let bestS = -1;
+    let bestE = -1;
+    for (const s of [segments[from.seg]!.a, segments[from.seg]!.b]) {
+      for (const e of [segments[to.seg]!.a, segments[to.seg]!.b]) {
+        const behind = heading !== undefined && (nodes[s]!.x - x) * Math.sin(heading) + (nodes[s]!.z - z) * Math.cos(heading) < 0;
+        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s]![e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
+        if (cost < bestCost) { bestCost = cost; bestS = s; bestE = e; }
+      }
+    }
+    if (bestS < 0) return null;
+    const path = [{ x: nodes[bestS]!.x, z: nodes[bestS]!.z }];
+    for (let at = bestS; at !== bestE;) {
+      at = next[at]![bestE]!;
+      path.push({ x: nodes[at]!.x, z: nodes[at]!.z });
+    }
+    path.push({ x: to.x, z: to.z });
+    return path;
+  };
+
+  const { bounds } = city;
+  const spots: { x: number; z: number }[] = [...nodes.map((n) => ({ x: n.x, z: n.z }))];
+  for (const s of segments) {
+    const a = nodes[s.a]!;
+    const b = nodes[s.b]!;
+    for (const t of [0.25, 0.5, 0.75]) spots.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+  }
+
+  return {
+    clear: geometry.clear,
+    open: (x, z, margin) => x > bounds.minX + margin && x < bounds.maxX - margin && z > bounds.minZ + margin && z < bounds.maxZ - margin
+      && geometry.wallDistance(x, z, margin) >= margin,
+    waypoint(x, z, gx, gz, heading) {
+      const path = route(x, z, gx, gz, heading);
+      if (!path) return null;
+      let i = 0;
+      while (i < path.length - 1 && Math.hypot(path[i]!.x - x, path[i]!.z - z) < REACH_M) i += 1;
+      return path[i]!;
+    },
+    coverSpot(x, z, tx, tz) {
+      let best: { x: number; z: number } | null = null;
+      let bestD = INF;
+      for (const spot of spots) {
+        const d = Math.hypot(spot.x - x, spot.z - z);
+        if (d > COVER_SEARCH_M || d >= bestD || Math.hypot(spot.x - tx, spot.z - tz) < 14 || geometry.clear(spot.x, spot.z, tx, tz)) continue;
+        best = spot;
+        bestD = d;
+      }
+      return best;
+    },
+  };
+}
+
 /**
  * A bot driver: chases the nearest threat (favouring the player), weaves while it fires, grabs
  * pickups when hurt or empty, ducks behind cover when badly hurt, and backs out when stuck.
@@ -61,7 +195,8 @@ export function createBotBrain(seed: number): BotBrain {
 
   return {
     think(view): BotCommand {
-      const { self, tick, layout } = view;
+      const { self, tick, layout, nav } = view;
+      const lineOk = (ax: number, az: number, bx: number, bz: number): boolean => (nav ? nav.clear(ax, az, bx, bz) : lineClear(layout, ax, az, bx, bz));
       const command: BotCommand = { steer: 0, throttle: 0, brake: false, fire: false, missile: false, special: false };
       if (!self.alive) return command;
 
@@ -92,6 +227,11 @@ export function createBotBrain(seed: number): BotBrain {
           coverReadyAt = tick + COVER_COOLDOWN_TICKS;
           coverUntil = 0;
           goal = target;
+        } else if (nav) {
+          // In a city, cover is a street spot the threat cannot see.
+          const spot = nav.coverSpot(self.x, self.z, target.x, target.z);
+          goal = spot ?? target;
+          holdPosition = spot !== null && Math.hypot(spot.x - self.x, spot.z - self.z) < 3;
         } else {
           let nearest = layout.obstacles[0];
           let nearestDistance = Infinity;
@@ -133,12 +273,17 @@ export function createBotBrain(seed: number): BotBrain {
 
       let desired = self.heading;
       if (goal) {
-        desired = Math.atan2(goal.x - self.x, goal.z - self.z);
+        // By street unless the way to the goal is open: buildings are walls, so go round them.
+        let aim: { x: number; z: number } = goal;
+        if (nav && !nav.clear(self.x, self.z, goal.x, goal.z)) aim = nav.waypoint(self.x, self.z, goal.x, goal.z, self.heading) ?? goal;
+        desired = Math.atan2(aim.x - self.x, aim.z - self.z);
         if (weaving) desired += weaveDir * 0.55;
         // Look ahead for cover or walls and swing wide when the way is blocked.
+        const lookAhead = nav ? 7 + Math.abs(self.speed) * 0.45 : 7;
         const probe = (angle: number): boolean => {
-          const px = self.x + Math.sin(angle) * 7;
-          const pz = self.z + Math.cos(angle) * 7;
+          const px = self.x + Math.sin(angle) * lookAhead;
+          const pz = self.z + Math.cos(angle) * lookAhead;
+          if (nav) return nav.clear(self.x, self.z, px, pz) && nav.open(px, pz, 2.5);
           if (Math.abs(px) > layout.halfExtent - 3 || Math.abs(pz) > layout.halfExtent - 3) return false;
           return lineClear(layout, self.x, self.z, px, pz) && layout.obstacles.every((o) => Math.abs(px - o.x) > o.halfX + 1.5 || Math.abs(pz - o.z) > o.halfZ + 1.5);
         };
@@ -150,7 +295,14 @@ export function createBotBrain(seed: number): BotBrain {
         const error = wrap(desired - self.heading);
         command.steer = clamp(-error * 2.5, -1, 1);
         const arrived = Math.hypot(goal.x - self.x, goal.z - self.z) < 3;
-        command.throttle = holdPosition || (arrived && goal !== target) ? 0 : Math.abs(error) > 1.4 ? 0.3 : distance < 9 && goal === target ? 0.4 : 1;
+        // Lift for a corner: a city car at full speed cannot make a right angle between walls.
+        const corner = nav !== undefined && Math.abs(error) > 0.6 && Math.abs(self.speed) > 14;
+        command.throttle = holdPosition || (arrived && goal !== target) ? 0 : Math.abs(error) > 1.4 ? 0.3 : corner ? 0.35 : distance < 9 && goal === target ? 0.4 : 1;
+        if (nav && Math.abs(error) > 0.6 && self.speed > (Math.abs(error) > 1.4 ? 9 : 18)) {
+          // Turning round, or into a side street: shed speed first so the car stays on the road.
+          command.throttle = 0;
+          command.brake = true;
+        }
         if (holdPosition) command.brake = true;
       }
 
@@ -159,7 +311,7 @@ export function createBotBrain(seed: number): BotBrain {
 
       if (target && tick >= BOT_GRACE_TICKS) {
         const aim = wrap(Math.atan2(target.x - self.x, target.z - self.z) - self.heading);
-        const clear = lineClear(layout, self.x, self.z, target.x, target.z);
+        const clear = lineOk(self.x, self.z, target.x, target.z);
         command.fire = distance < GUN_RANGE && Math.abs(aim) < GUN_ALIGNMENT && clear;
         command.missile = self.missiles > 0 && self.lockId !== null && distance > 9 && rng() < 0.05;
         command.special =
