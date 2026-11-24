@@ -68,14 +68,14 @@
     {
       "source": "/decisions/9",
       "status": "linked",
-      "taskId": "W1-T14727",
-      "proof": "unit test: W1-T14727: the start screen defaults to easy"
+      "taskId": "WRECK-T17",
+      "proof": "unit test: WRECK-T17: the start screen defaults to easy"
     },
     {
       "source": "/decisions/10",
       "status": "linked",
-      "taskId": "W1-T14727",
-      "proof": "unit test: W1-T14727: a still player survives longer on easier levels"
+      "taskId": "WRECK-T17",
+      "proof": "unit test: WRECK-T17: a still player survives longer on easier levels"
     }
   ]
 }
