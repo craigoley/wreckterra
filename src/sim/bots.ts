@@ -1,6 +1,7 @@
 import { lineClear } from "./arena";
 import type { CombatArenaLayout, CombatVehicleState, PickupState } from "./contracts";
 import type { CityData } from "../maps/city-compiler";
+import { createSpatialIndex } from "../maps/spatial-index";
 import { createRng, type CityGeometry } from "./world";
 
 /** What a bot needs to know about a city: where the streets lead and what a building hides. */
@@ -14,6 +15,12 @@ export interface BotNav {
    * route. Given the car's heading, a junction behind it costs a U-turn's worth of extra distance.
    */
   waypoint(x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number } | null;
+  /**
+   * Pure pursuit along the lane centres of the street trip to a goal: the car's own spot on the nearest
+   * lane is the start, so a car shoved off the street heads back to it. `near` is `ahead` metres along
+   * the lane and `far` is `farther` metres along, for judging how sharp the next turn is. Null with no route.
+   */
+  lane(x: number, z: number, gx: number, gz: number, heading: number, ahead: number, farther: number): { near: { x: number; z: number }; far: { x: number; z: number } } | null;
   /** A street spot near (x, z) that a threat at (tx, tz) cannot see, or null when there is none. */
   coverSpot(x: number, z: number, tx: number, tz: number): { x: number; z: number } | null;
 }
@@ -69,16 +76,21 @@ const COVER_SEARCH_M = 140;
 const U_TURN_M = 60;
 const INF = Number.POSITIVE_INFINITY;
 
+/** One street-graph leg: the node it ends at and how long it is. */
+interface Leg { to: number; length: number }
+/** Shortest distances to one node and the first hop towards it from every other node. */
+interface Row { dist: Float64Array; next: Int32Array }
+
 /**
  * Street routing for a city match. Streets are treated as two-way (a wreck-fest ignores one-way
- * signs), all-pairs shortest paths are precomputed once, and a trip is snapped onto the nearest
- * street segment at both ends, so asking for the next waypoint is a handful of lookups.
+ * signs). A shortest-path tree is grown from a destination node the first time a trip ends there and
+ * kept, and a trip is snapped onto the nearest street segment at both ends through a grid over the
+ * segments, so asking for the next waypoint costs a handful of lookups however big the district is.
  */
 export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav {
   const nodes = city.graph.nodes;
   const count = nodes.length;
-  const dist: number[][] = Array.from({ length: count }, (_, i) => Array.from({ length: count }, (_, j) => (i === j ? 0 : INF)));
-  const next: number[][] = Array.from({ length: count }, () => Array.from({ length: count }, () => -1));
+  const adjacent: Leg[][] = Array.from({ length: count }, () => []);
   const seen = new Set<string>();
   const segments: { a: number; b: number }[] = [];
   for (const e of city.graph.edges) {
@@ -86,63 +98,123 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     if (e.from === e.to || seen.has(key)) continue;
     seen.add(key);
     segments.push({ a: e.from, b: e.to });
-    dist[e.from]![e.to] = e.length;
-    dist[e.to]![e.from] = e.length;
-    next[e.from]![e.to] = e.to;
-    next[e.to]![e.from] = e.from;
+    adjacent[e.from]!.push({ to: e.to, length: e.length });
+    adjacent[e.to]!.push({ to: e.from, length: e.length });
   }
-  for (let k = 0; k < count; k += 1) {
-    for (let i = 0; i < count; i += 1) {
-      for (let j = 0; j < count; j += 1) {
-        if (dist[i]![k]! + dist[k]![j]! < dist[i]![j]!) {
-          dist[i]![j] = dist[i]![k]! + dist[k]![j]!;
-          next[i]![j] = next[i]![k]!;
+
+  const rows = new Map<number, Row>();
+  const rowTo = (goal: number): Row => {
+    const cached = rows.get(goal);
+    if (cached) return cached;
+    const dist = new Float64Array(count).fill(INF);
+    const next = new Int32Array(count).fill(-1);
+    const done = new Uint8Array(count);
+    dist[goal] = 0;
+    // A binary heap of [distance, node]; stale entries are skipped when popped.
+    const heap: [number, number][] = [[0, goal]];
+    const push = (item: [number, number]): void => {
+      heap.push(item);
+      for (let i = heap.length - 1; i > 0;) {
+        const parent = (i - 1) >> 1;
+        if (heap[parent]![0] <= heap[i]![0]) break;
+        [heap[parent], heap[i]] = [heap[i]!, heap[parent]!];
+        i = parent;
+      }
+    };
+    const pop = (): [number, number] => {
+      const top = heap[0]!;
+      const last = heap.pop()!;
+      if (heap.length > 0) {
+        heap[0] = last;
+        for (let i = 0;;) {
+          const [l, r] = [2 * i + 1, 2 * i + 2];
+          let m = i;
+          if (l < heap.length && heap[l]![0] < heap[m]![0]) m = l;
+          if (r < heap.length && heap[r]![0] < heap[m]![0]) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i]!, heap[m]!];
+          i = m;
+        }
+      }
+      return top;
+    };
+    while (heap.length > 0) {
+      const [d, at] = pop();
+      if (done[at]) continue;
+      done[at] = 1;
+      for (const leg of adjacent[at]!) {
+        if (d + leg.length < dist[leg.to]!) {
+          dist[leg.to] = d + leg.length;
+          // Streets are two-way, so the hop towards the goal from `leg.to` is back to `at`.
+          next[leg.to] = at;
+          push([dist[leg.to]!, leg.to]);
         }
       }
     }
-  }
+    const row = { dist, next };
+    rows.set(goal, row);
+    return row;
+  };
+
+  // A grid over the street segments: the nearest one is found among the few near the point.
+  const segmentBoxes = segments.map((sg) => {
+    const a = nodes[sg.a]!;
+    const b = nodes[sg.b]!;
+    return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z) };
+  });
+  const segmentIndex = createSpatialIndex(segmentBoxes);
 
   const snap = (x: number, z: number): { seg: number; x: number; z: number } => {
     let best = { seg: -1, x, z };
     let bestD = INF;
-    segments.forEach((s, i) => {
-      const a = nodes[s.a]!;
-      const b = nodes[s.b]!;
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len2 = dx * dx + dz * dz;
-      const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
-      const px = a.x + dx * t;
-      const pz = a.z + dz * t;
-      const d = Math.hypot(x - px, z - pz);
-      if (d < bestD) { bestD = d; best = { seg: i, x: px, z: pz }; }
-    });
+    if (segments.length === 0) return best;
+    // Widen the search until a segment is found inside it: that one is then the nearest.
+    for (let reach = 40; reach < 1e6; reach *= 2) {
+      for (const i of segmentIndex.query(x - reach, z - reach, x + reach, z + reach)) {
+        const s = segments[i]!;
+        const a = nodes[s.a]!;
+        const b = nodes[s.b]!;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const len2 = dx * dx + dz * dz;
+        const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+        const px = a.x + dx * t;
+        const pz = a.z + dz * t;
+        const d = Math.hypot(x - px, z - pz);
+        if (d < bestD) { bestD = d; best = { seg: i, x: px, z: pz }; }
+      }
+      if (bestD <= reach) break;
+    }
     return best;
   };
 
-  const route = (x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number }[] | null => {
+  /** The street trip from here to there: where it joins the street, then each junction, then where it ends. */
+  const route = (x: number, z: number, gx: number, gz: number, heading?: number): { start: { x: number; z: number }; path: { x: number; z: number }[] } | null => {
     const from = snap(x, z);
     const to = snap(gx, gz);
     if (from.seg < 0 || to.seg < 0) return null;
-    if (from.seg === to.seg) return [{ x: to.x, z: to.z }];
+    const start = { x: from.x, z: from.z };
+    if (from.seg === to.seg) return { start, path: [{ x: to.x, z: to.z }] };
     let bestCost = INF;
     let bestS = -1;
     let bestE = -1;
-    for (const s of [segments[from.seg]!.a, segments[from.seg]!.b]) {
-      for (const e of [segments[to.seg]!.a, segments[to.seg]!.b]) {
+    for (const e of [segments[to.seg]!.a, segments[to.seg]!.b]) {
+      const row = rowTo(e);
+      for (const s of [segments[from.seg]!.a, segments[from.seg]!.b]) {
         const behind = heading !== undefined && (nodes[s]!.x - x) * Math.sin(heading) + (nodes[s]!.z - z) * Math.cos(heading) < 0;
-        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s]![e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
+        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + row.dist[s]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
         if (cost < bestCost) { bestCost = cost; bestS = s; bestE = e; }
       }
     }
     if (bestS < 0) return null;
     const path = [{ x: nodes[bestS]!.x, z: nodes[bestS]!.z }];
+    const row = rowTo(bestE);
     for (let at = bestS; at !== bestE;) {
-      at = next[at]![bestE]!;
+      at = row.next[at]!;
       path.push({ x: nodes[at]!.x, z: nodes[at]!.z });
     }
     path.push({ x: to.x, z: to.z });
-    return path;
+    return { start, path };
   };
 
   const { bounds } = city;
@@ -157,9 +229,46 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     clear: geometry.clear,
     open: (x, z, margin) => x > bounds.minX + margin && x < bounds.maxX - margin && z > bounds.minZ + margin && z < bounds.maxZ - margin
       && geometry.wallDistance(x, z, margin) >= margin,
+    lane(x, z, gx, gz, heading, ahead, farther) {
+      const trip = route(x, z, gx, gz, heading);
+      if (!trip) return null;
+      const points = [trip.start, ...trip.path];
+      // Where the car is on its lane, then a point `ahead` metres further along the lane centre.
+      let bestK = 0;
+      let bestT = 0;
+      let bestD = INF;
+      for (let k = 0; k + 1 < points.length; k += 1) {
+        const a = points[k]!;
+        const b = points[k + 1]!;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const len2 = dx * dx + dz * dz;
+        const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+        const d = Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t));
+        if (d < bestD) { bestD = d; bestK = k; bestT = t; }
+      }
+      const along = (distance: number): { x: number; z: number } => {
+        let k = bestK;
+        let px = points[k]!.x + (points[k + 1]!.x - points[k]!.x) * bestT;
+        let pz = points[k]!.z + (points[k + 1]!.z - points[k]!.z) * bestT;
+        let left = distance;
+        while (k + 1 < points.length) {
+          const e = points[k + 1]!;
+          const d = Math.hypot(e.x - px, e.z - pz);
+          if (d >= left && d > 0) return { x: px + ((e.x - px) * left) / d, z: pz + ((e.z - pz) * left) / d };
+          left -= d;
+          px = e.x;
+          pz = e.z;
+          k += 1;
+        }
+        return { x: px, z: pz };
+      };
+      return { near: along(ahead), far: along(farther) };
+    },
     waypoint(x, z, gx, gz, heading) {
-      const path = route(x, z, gx, gz, heading);
-      if (!path) return null;
+      const trip = route(x, z, gx, gz, heading);
+      if (!trip) return null;
+      const path = trip.path;
       let i = 0;
       while (i < path.length - 1 && Math.hypot(path[i]!.x - x, path[i]!.z - z) < REACH_M) i += 1;
       return path[i]!;

@@ -12,7 +12,7 @@ import {
   type VehicleState,
 } from "./contracts";
 import { closestOnSegment, pointInRing, type CityData, type Vec2 } from "../maps/city-compiler";
-import { circleVsFootprint, type Contact } from "../maps/midtown";
+import { cityContacts, cityIndexFor, cityOnRoad, type Contact, type Footprint } from "../maps/midtown";
 
 export interface WorldOptions {
   seed: number;
@@ -329,19 +329,14 @@ export interface CityGeometry {
   roadDistance(x: number, z: number): number;
 }
 
-interface Footprint { ring: readonly Vec2[]; minX: number; maxX: number; minZ: number; maxZ: number }
-
 /**
  * Index a city's buildings and roads for the combat simulation. Pure geometry with no clock and no
- * randomness; bounding boxes reject most buildings before any edge is touched.
+ * randomness; a uniform grid (built once per city) hands each query only the buildings and road
+ * segments in the cells it touches, so the cost of a query does not grow with the size of the district.
  */
 export function createCityGeometry(city: CityData): CityGeometry {
-  const footprints: Footprint[] = city.buildings.map((b) => {
-    const xs = b.footprint.map((p) => p[0]);
-    const zs = b.footprint.map((p) => p[1]);
-    return { ring: b.footprint, minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
-  });
-  const segments = city.roads.flatMap((r) => r.points.slice(1).map((p, i) => ({ a: r.points[i]!, b: p, half: r.width / 2 + 0.4 })));
+  const index = cityIndexFor(city);
+  const { footprints, buildings, segments, roads } = index;
   const near = (f: Footprint, x: number, z: number, margin: number): boolean => x >= f.minX - margin && x <= f.maxX + margin && z >= f.minZ - margin && z <= f.maxZ + margin;
 
   /** Does the ray touch the footprint's bounding box within `limit` metres? */
@@ -362,44 +357,45 @@ export function createCityGeometry(city: CityData): CityGeometry {
     return true;
   };
 
-  const rayCover = (ox: number, oz: number, dx: number, dz: number): number => {
-    let nearest = Infinity;
-    for (const f of footprints) {
-      if (!rayHitsBox(f, ox, oz, dx, dz, nearest)) continue;
-      if (near(f, ox, oz, 0) && pointInRing([ox, oz], f.ring)) return 0;
+  /** The nearest wall within `limit` metres along a unit ray (0 from inside a building), else `limit`. */
+  const cover = (ox: number, oz: number, dx: number, dz: number, limit: number): number => {
+    let nearest = limit;
+    buildings.along(ox, oz, dx, dz, limit, (id) => {
+      const f = footprints[id]!;
+      if (!rayHitsBox(f, ox, oz, dx, dz, nearest)) return nearest;
+      if (near(f, ox, oz, 0) && pointInRing([ox, oz], f.ring)) { nearest = 0; return 0; }
       for (let i = 0; i < f.ring.length; i += 1) nearest = Math.min(nearest, rayEdge(ox, oz, dx, dz, f.ring[i]!, f.ring[(i + 1) % f.ring.length]!));
-    }
+      return nearest;
+    });
     return nearest;
   };
-  const solidAt = (x: number, z: number): boolean => footprints.some((f) => near(f, x, z, 0) && pointInRing([x, z], f.ring));
+  const solidAt = (x: number, z: number): boolean => buildings.query(x, z, x, z).some((id) => pointInRing([x, z], footprints[id]!.ring));
   const roadDistance = (x: number, z: number): number => {
-    let best = Infinity;
-    for (const s of segments) {
-      const c = closestOnSegment([x, z], s.a, s.b);
-      best = Math.min(best, Math.hypot(x - c[0], z - c[1]));
+    // Widen the search until a segment is found inside it: that one is then the nearest.
+    for (let reach = 24; ; reach *= 2) {
+      let best = Infinity;
+      for (const id of roads.query(x - reach, z - reach, x + reach, z + reach)) {
+        const s = segments[id]!;
+        const c = closestOnSegment([x, z], s.a, s.b);
+        best = Math.min(best, Math.hypot(x - c[0], z - c[1]));
+      }
+      if (best <= reach) return best;
+      if (reach > 1e6) return best;
     }
-    return best;
   };
 
   return {
-    rayCover,
+    rayCover: (ox, oz, dx, dz) => cover(ox, oz, dx, dz, Infinity),
     clear(ax, az, bx, bz) {
       const length = Math.hypot(bx - ax, bz - az);
-      return length < 1e-6 || rayCover(ax, az, (bx - ax) / length, (bz - az) / length) >= length;
+      return length < 1e-6 || cover(ax, az, (bx - ax) / length, (bz - az) / length, length) >= length;
     },
     solidAt,
-    contacts(x, z, radius) {
-      const out: Contact[] = [];
-      for (const f of footprints) {
-        if (!near(f, x, z, radius)) continue;
-        const contact = circleVsFootprint(x, z, radius, f.ring);
-        if (contact) out.push(contact);
-      }
-      return out;
-    },
+    contacts: (x, z, radius) => cityContacts(index, x, z, radius),
     wallDistance(x, z, cap) {
       let best = cap;
-      for (const f of footprints) {
+      for (const id of buildings.query(x - cap, z - cap, x + cap, z + cap)) {
+        const f = footprints[id]!;
         if (!near(f, x, z, best)) continue;
         if (pointInRing([x, z], f.ring)) return 0;
         for (let i = 0; i < f.ring.length; i += 1) {
@@ -409,10 +405,7 @@ export function createCityGeometry(city: CityData): CityGeometry {
       }
       return best;
     },
-    onRoad: (x, z) => segments.some((s) => {
-      const c = closestOnSegment([x, z], s.a, s.b);
-      return Math.hypot(x - c[0], z - c[1]) <= s.half;
-    }),
+    onRoad: (x, z) => cityOnRoad(index, x, z),
     roadDistance,
   };
 }

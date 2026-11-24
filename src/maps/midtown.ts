@@ -18,6 +18,7 @@ import {
   type VehicleState,
 } from "../sim/contracts";
 import { CITY_VERSION, closestOnSegment, pointInRing, signedArea, type CityData, type Vec2 } from "./city-compiler";
+import { createSpatialIndex, type SpatialIndex } from "./spatial-index";
 
 /** The compiled city is a static file served from our own origin: production never calls Overpass. */
 export const CITY_URL = `${import.meta.env.BASE_URL}maps/midtown/city.json`;
@@ -85,6 +86,64 @@ export function circleVsFootprint(x: number, z: number, radius: number, ring: re
     return { nx: (b[1] - a[1]) / len, nz: -(b[0] - a[0]) / len, depth: (inside ? best : 0) + radius };
   }
   return { nx: (x - bestPoint[0]) / best, nz: (z - bestPoint[1]) / best, depth: radius - best };
+}
+
+/* ---------------------------------------------------------------- the city index */
+
+export interface Footprint { ring: readonly Vec2[]; minX: number; maxX: number; minZ: number; maxZ: number }
+export interface RoadSegment { a: Vec2; b: Vec2; half: number }
+
+/** A city's buildings and road segments in two uniform grids, so a query reads only the cells it touches. */
+export interface CityIndex {
+  footprints: readonly Footprint[];
+  buildings: SpatialIndex;
+  segments: readonly RoadSegment[];
+  roads: SpatialIndex;
+}
+
+const indexes = new WeakMap<CityData, CityIndex>();
+
+/** The spatial index of a city, built once per city object and shared by every world and match on it. */
+export function cityIndexFor(city: CityData): CityIndex {
+  const cached = indexes.get(city);
+  if (cached) return cached;
+  const footprints: Footprint[] = city.buildings.map((b) => {
+    const xs = b.footprint.map((p) => p[0]);
+    const zs = b.footprint.map((p) => p[1]);
+    return { ring: b.footprint, minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+  });
+  const segments: RoadSegment[] = city.roads.flatMap((r) => r.points.slice(1).map((p, i) => ({ a: r.points[i]!, b: p, half: r.width / 2 + 0.4 })));
+  const built: CityIndex = {
+    footprints,
+    buildings: createSpatialIndex(footprints),
+    segments,
+    roads: createSpatialIndex(segments.map((s) => ({
+      minX: Math.min(s.a[0], s.b[0]) - s.half, maxX: Math.max(s.a[0], s.b[0]) + s.half,
+      minZ: Math.min(s.a[1], s.b[1]) - s.half, maxZ: Math.max(s.a[1], s.b[1]) + s.half,
+    }))),
+  };
+  indexes.set(city, built);
+  return built;
+}
+
+/** Every building a circle overlaps, as push-out contacts, found through the grid. */
+export function cityContacts(index: CityIndex, x: number, z: number, radius: number): Contact[] {
+  const out: Contact[] = [];
+  for (const id of index.buildings.query(x - radius, z - radius, x + radius, z + radius)) {
+    const contact = circleVsFootprint(x, z, radius, index.footprints[id]!.ring);
+    if (contact) out.push(contact);
+  }
+  return out;
+}
+
+/** True when a point is within a road segment's half width (a little generous at the kerb). */
+export function cityOnRoad(index: CityIndex, x: number, z: number): boolean {
+  for (const id of index.roads.query(x, z, x, z)) {
+    const s = index.segments[id]!;
+    const c = closestOnSegment([x, z], s.a, s.b);
+    if (Math.hypot(x - c[0], z - c[1]) <= s.half) return true;
+  }
+  return false;
 }
 
 /* ---------------------------------------------------------------- the city world */
@@ -164,16 +223,8 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
   const acceleration = spec.acceleration * CITY_ACCEL_SCALE;
   const { bounds } = city;
 
-  const boxes: Box[] = city.buildings.map((b) => {
-    const xs = b.footprint.map((p) => p[0]);
-    const zs = b.footprint.map((p) => p[1]);
-    return { minX: Math.min(...xs) - HIT_RADIUS, maxX: Math.max(...xs) + HIT_RADIUS, minZ: Math.min(...zs) - HIT_RADIUS, maxZ: Math.max(...zs) + HIT_RADIUS };
-  });
-  const segments = city.roads.flatMap((r) => r.points.slice(1).map((p, i) => ({ a: r.points[i]!, b: p, half: r.width / 2 + 0.4 })));
-  const onRoad = (x: number, z: number): boolean => segments.some((s) => {
-    const c = closestOnSegment([x, z], s.a, s.b);
-    return Math.hypot(x - c[0], z - c[1]) <= s.half;
-  });
+  const index = cityIndexFor(city);
+  const boxes: Box[] = index.footprints.map((f) => ({ minX: f.minX - HIT_RADIUS, maxX: f.maxX + HIT_RADIUS, minZ: f.minZ - HIT_RADIUS, maxZ: f.maxZ + HIT_RADIUS }));
 
   const layout: ArenaLayout = {
     halfExtent: Math.max(Math.abs(bounds.minX), Math.abs(bounds.maxX), Math.abs(bounds.minZ), Math.abs(bounds.maxZ)),
@@ -244,11 +295,7 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
     for (let pass = 0; pass < 3; pass += 1) {
       let moved = false;
       for (const [cx, cz] of hitCircles(x, z, heading)) {
-        for (let i = 0; i < city.buildings.length; i += 1) {
-          const box = boxes[i]!;
-          if (cx < box.minX || cx > box.maxX || cz < box.minZ || cz > box.maxZ) continue;
-          const contact = circleVsFootprint(cx, cz, HIT_RADIUS, city.buildings[i]!.footprint);
-          if (!contact) continue;
+        for (const contact of cityContacts(index, cx, cz, HIT_RADIUS)) {
           x += contact.nx * contact.depth;
           z += contact.nz * contact.depth;
           const vn = vx * contact.nx + vz * contact.nz;
@@ -279,7 +326,7 @@ export function createCityWorld(city: CityData, options: CityWorldOptions): City
     const ufz = Math.cos(heading);
     forward = vx * ufx + vz * ufz;
     lateral = vx * ufz - vz * ufx;
-    offRoad = !onRoad(x, z);
+    offRoad = !cityOnRoad(index, x, z);
   }
 
   const state = (): CityVehicleState => ({ playerId, x, z, heading, speed: forward, kind, lateral, offRoad });
