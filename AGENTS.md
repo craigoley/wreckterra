@@ -9,3 +9,5 @@ Run `npm run typecheck`, `npm test`, `npm run build` and `npm run security` for 
 Keep simulation fixed-tick, seeded and independent of React/rendering. Network authority, input and snapshot contracts must remain versionable. OSM-derived data requires source receipts, ODbL compliance and visible attribution. Public map/geocoding endpoints are not an unbounded runtime backend. No new paid service without authorization.
 
 This starter is onboarding preparation, not WRECK-T1 implementation credit. Its garage is a preview; do not claim playable combat or geographic fidelity from it. Future plans must name real caller files and file only a qualified frontier. Preserve the broader roadmap without fabricated caller files or guard exceptions.
+
+The simulation lives in `src/sim/`: `contracts.ts` holds the versioned input, event and snapshot shapes and the `LocalAuthority` interface; `world.ts` holds `createWorld` and the frame loop. They must not import React, the DOM or a renderer. `src/App.tsx` is the caller. Three and Rapier are not dependencies yet; the surface is an SVG top-down arena until they are added.
