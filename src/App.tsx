@@ -2,36 +2,55 @@ import { useEffect, useRef, useState } from "react";
 import cityFile from "../public/maps/midtown/city.json";
 import { Hud } from "./game/Hud";
 import { IDLE, KEYS, TouchControls, type Held } from "./game/TouchControls";
-import { CityBattle, VehicleScene, VEHICLES, type Vehicle } from "./game/VehicleScene";
+import { CityBattle, VEHICLES, type Vehicle } from "./game/VehicleScene";
+import type { LatLon } from "./maps/city-cache";
 import type { CityData } from "./maps/city-compiler";
 import { parseCity } from "./maps/midtown";
+import { loadLiveCity, type LiveCityOutcome } from "./maps/tile-city";
 import { createCityMatch, PLAYER_ID } from "./sim/combat";
 import { CONTRACT_VERSION, type CombatAuthority, type CombatSnapshot } from "./sim/contracts";
 import { pushEvents, startLoop, type EventBus, type LoopHandle } from "./sim/world";
+import { createPlaceSearch, type PlaceSearch } from "./ui/place-search";
+import { StartScreen, useStartFlow, type MapFactory } from "./ui/StartScreen";
 
 const MATCH_SEED = 20261124;
 /** Redraw the HUD this often (in ticks); the 3D view reads the match every frame regardless. */
 const HUD_EVERY_TICKS = 4;
 
-/** The compiled Midtown district ships inside the app, so a match can start on the first frame and offline. */
-const DISTRICT: { city: CityData } | { error: string } = (() => {
-  try { return { city: parseCity(cityFile) }; }
-  catch (error) { return { error: error instanceof Error ? error.message : "The city could not be read." }; }
+/** The compiled Midtown district ships inside the app; it is what a refused place falls back to, offline too. */
+const PINNED_CITY: CityData | null = (() => {
+  try { return parseCity(cityFile); }
+  catch { return null; }
 })();
 
-function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: Held } }) {
+/** Build a live city for a picked point from OpenFreeMap tiles, caching it on the device and reporting progress. */
+async function loadLiveCityInBrowser(point: LatLon, report: (message: string) => void): Promise<LiveCityOutcome> {
+  report("Preparing the map tile loader…");
+  // Loaded on demand so the tile decoder stays out of the start screen's first load.
+  const [{ fetchTileFeatures }, { createIndexedDbStore }] = await Promise.all([import("./maps/live-tiles"), import("./maps/city-cache")]);
+  return loadLiveCity(point, {
+    cache: createIndexedDbStore(),
+    fetchTiles: async (request) => {
+      report("Fetching map tiles…");
+      const tiles = await fetchTileFeatures(request);
+      report(`Building the city from ${tiles.features.length} map features…`);
+      return tiles;
+    },
+  });
+}
+
+function CombatSurface({ city, vehicle, held, onChangePlace }: { city: CityData; vehicle: Vehicle; held: { current: Held }; onChangePlace: () => void }) {
   const loopRef = useRef<LoopHandle | null>(null);
   const restartRef = useRef<() => void>(() => undefined);
   const bus = useRef<EventBus>({ events: [] });
   const [match, setMatch] = useState<CombatAuthority | null>(null);
   const [snapshot, setSnapshot] = useState<CombatSnapshot | null>(null);
   const [paused, setPaused] = useState(false);
-  const [failure, setFailure] = useState<string | null>("error" in DISTRICT ? DISTRICT.error : null);
+  const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
-    if ("error" in DISTRICT) return undefined;
     let current: CombatAuthority;
-    try { current = createCityMatch(DISTRICT.city, { seed: MATCH_SEED, playerVehicle: vehicle.id }); }
+    try { current = createCityMatch(city, { seed: MATCH_SEED, playerVehicle: vehicle.id }); }
     catch (error) { setFailure(error instanceof Error ? error.message : "The combat simulation could not start."); return undefined; }
     setFailure(null);
     setMatch(current);
@@ -104,16 +123,20 @@ function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: H
       restartRef.current = () => undefined;
       clear();
     };
-  }, [vehicle, held]);
+  }, [city, vehicle, held]);
 
-  if (failure || "error" in DISTRICT) return <section className="drive" aria-label="Combat city"><p role="alert" className="drive-error">The city fight could not start: {failure} Reload the page to try again.</p></section>;
+  if (failure) return <section className="drive" aria-label="Combat city"><p role="alert" className="drive-error">The city fight could not start: {failure} <button type="button" onClick={onChangePlace}>Change place</button></p></section>;
   const player = snapshot?.vehicles.find((v) => v.playerId === PLAYER_ID);
   const hurt = snapshot && player && player.alive && snapshot.tick - player.lastHitTick < 12 && snapshot.match.status === "running";
   return <section className="drive" aria-label="Combat city">
     {snapshot && <Hud snapshot={snapshot} onRestart={() => restartRef.current()} />}
     <div className="drive-stage" style={{ position: "relative", maxWidth: "none" }}>
-      {match && <CityBattle city={DISTRICT.city} match={match} bus={bus} vehicle={vehicle} />}
+      {match && <CityBattle city={city} match={match} bus={bus} vehicle={vehicle} />}
       <div aria-hidden="true" style={{ position: "absolute", inset: 0, borderRadius: 12, pointerEvents: "none", boxShadow: hurt ? "inset 0 0 70px 18px rgba(232,60,40,0.55)" : "inset 0 0 0 0 rgba(232,60,40,0)", transition: "box-shadow 120ms ease-out" }} />
+      {snapshot && snapshot.match.status !== "running" && <div className="results" role="dialog" aria-label="Match results">
+        <p>{snapshot.match.status === "won" ? "Victory" : "Wrecked"}</p>
+        <div className="results-actions"><button type="button" onClick={() => restartRef.current()}>Restart</button><button type="button" onClick={onChangePlace}>Change place</button></div>
+      </div>}
       {paused && <button type="button" className="resume" onClick={() => { loopRef.current?.resume(); setPaused(false); }}>Paused — tap to resume</button>}
     </div>
     <TouchControls held={held} />
@@ -121,20 +144,31 @@ function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: H
   </section>;
 }
 
-export default function App() {
+export interface AppProps {
+  /** Replaces the live city loader (tests). */
+  loadCity?: (point: LatLon, report: (message: string) => void) => Promise<LiveCityOutcome>;
+  /** Replaces the Nominatim place search (tests). */
+  search?: PlaceSearch;
+  /** Replaces the MapLibre map (tests). */
+  createMap?: MapFactory;
+}
+
+export default function App({ loadCity = loadLiveCityInBrowser, search, createMap }: AppProps) {
   const [selected, setSelected] = useState(0);
-  const vehicle = VEHICLES[selected];
+  const vehicle = VEHICLES[selected]!;
   // One set of controls (keys, touch pads, gamepad) drives the city fight.
   const held = useRef<Held>({ ...IDLE });
+  const [placeSearch] = useState<PlaceSearch>(() => search ?? createPlaceSearch());
+  const flow = useStartFlow({ loadCity, pinned: PINNED_CITY });
+  const { phase } = flow;
   return <main>
-    <header><a className="arcade" href="https://www.oleyarcade.com/">← OleyArcade</a><span className="edition">Garage preview</span></header>
-    <section className="intro" aria-labelledby="title"><p className="eyebrow">The world is your arena</p><h1 id="title">WRECK<span>TERRA</span></h1><p className="lede">Take the scenic route.<br/>Leave a wreck.</p></section>
-    <CombatSurface vehicle={vehicle} held={held} />
-    <section className="garage" aria-label="Vehicle garage"><VehicleScene vehicle={vehicle} />
-      <div className="vehicle-heading"><div><p className="eyebrow">Your ride</p><h2>{vehicle.name}</h2></div><p>{vehicle.role}</p></div>
-      <div className="choices" role="group" aria-label="Choose a vehicle">{VEHICLES.map((item, index) => <button key={item.id} type="button" aria-pressed={selected === index} onClick={() => setSelected(index)}><span>{item.name}</span><small>{item.role}</small></button>)}</div>
-      <dl className="stats" aria-live="polite"><div><dt>Speed</dt><dd>{vehicle.speed} / 5</dd></div><div><dt>Armor</dt><dd>{vehicle.armor} / 5</dd></div><div><dt>First arena</dt><dd>Central Park</dd></div></dl>
-    </section>
-    <footer><strong>New York is up first.</strong><p>The driving prototype is in development. This garage lets you preview the original starter vehicles.</p></footer>
+    <header><a className="arcade" href="https://www.oleyarcade.com/">← OleyArcade</a><span className="edition">{phase.name === "playing" ? phase.place.name : "Garage preview"}</span></header>
+    {phase.name === "playing"
+      ? <CombatSurface city={phase.city} vehicle={vehicle} held={held} onChangePlace={flow.changePlace} />
+      : <>
+        <section className="intro" aria-labelledby="title"><p className="eyebrow">The world is your arena</p><h1 id="title">WRECK<span>TERRA</span></h1><p className="lede">Take the scenic route.<br/>Leave a wreck.</p></section>
+        <StartScreen flow={flow} search={placeSearch} selected={selected} onSelectVehicle={setSelected} createMap={createMap} />
+        <footer><strong>New York is up first.</strong><p>The driving prototype is in development. This garage lets you preview the original starter vehicles.</p></footer>
+      </>}
   </main>;
 }
