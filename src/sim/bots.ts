@@ -1,6 +1,7 @@
 import { lineClear } from "./arena";
 import type { CombatArenaLayout, CombatVehicleState, PickupState } from "./contracts";
 import type { CityData } from "../maps/city-compiler";
+import { createSpatialIndex } from "../maps/spatial-index";
 import { createRng, type CityGeometry } from "./world";
 
 /** What a bot needs to know about a city: where the streets lead and what a building hides. */
@@ -68,6 +69,8 @@ const COVER_SEARCH_M = 140;
 /** Extra road distance charged for a first junction that lies behind the car. */
 const U_TURN_M = 60;
 const INF = Number.POSITIVE_INFINITY;
+/** Cell edge of the street-segment grid, metres. */
+const SNAP_CELL_M = 64;
 
 /**
  * Street routing for a city match. Streets are treated as two-way (a wreck-fest ignores one-way
@@ -77,8 +80,10 @@ const INF = Number.POSITIVE_INFINITY;
 export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav {
   const nodes = city.graph.nodes;
   const count = nodes.length;
-  const dist: number[][] = Array.from({ length: count }, (_, i) => Array.from({ length: count }, (_, j) => (i === j ? 0 : INF)));
-  const next: number[][] = Array.from({ length: count }, () => Array.from({ length: count }, () => -1));
+  // Flat typed arrays: the all-pairs sweep below is n cubed, so it must not chase nested arrays.
+  const dist = new Float64Array(count * count).fill(INF);
+  const next = new Int32Array(count * count).fill(-1);
+  for (let i = 0; i < count; i += 1) dist[i * count + i] = 0;
   const seen = new Set<string>();
   const segments: { a: number; b: number }[] = [];
   for (const e of city.graph.edges) {
@@ -86,38 +91,48 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     if (e.from === e.to || seen.has(key)) continue;
     seen.add(key);
     segments.push({ a: e.from, b: e.to });
-    dist[e.from]![e.to] = e.length;
-    dist[e.to]![e.from] = e.length;
-    next[e.from]![e.to] = e.to;
-    next[e.to]![e.from] = e.from;
+    dist[e.from * count + e.to] = e.length;
+    dist[e.to * count + e.from] = e.length;
+    next[e.from * count + e.to] = e.to;
+    next[e.to * count + e.from] = e.from;
   }
   for (let k = 0; k < count; k += 1) {
     for (let i = 0; i < count; i += 1) {
+      const ik = dist[i * count + k]!;
+      if (ik === INF) continue;
       for (let j = 0; j < count; j += 1) {
-        if (dist[i]![k]! + dist[k]![j]! < dist[i]![j]!) {
-          dist[i]![j] = dist[i]![k]! + dist[k]![j]!;
-          next[i]![j] = next[i]![k]!;
+        const through = ik + dist[k * count + j]!;
+        if (through < dist[i * count + j]!) {
+          dist[i * count + j] = through;
+          next[i * count + j] = next[i * count + k]!;
         }
       }
     }
   }
 
+  // Segments are filed in a grid, so snapping a car to the street looks at the few nearest ones.
+  const segmentGrid = createSpatialIndex(city.bounds, SNAP_CELL_M, segments.length);
+  segments.forEach((s, i) => {
+    const a = nodes[s.a]!;
+    const b = nodes[s.b]!;
+    segmentGrid.insert(i, Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z));
+  });
+  const onSegment = (i: number, x: number, z: number): { x: number; z: number; d: number } => {
+    const a = nodes[segments[i]!.a]!;
+    const b = nodes[segments[i]!.b]!;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len2 = dx * dx + dz * dz;
+    const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+    const px = a.x + dx * t;
+    const pz = a.z + dz * t;
+    return { x: px, z: pz, d: Math.hypot(x - px, z - pz) };
+  };
   const snap = (x: number, z: number): { seg: number; x: number; z: number } => {
-    let best = { seg: -1, x, z };
-    let bestD = INF;
-    segments.forEach((s, i) => {
-      const a = nodes[s.a]!;
-      const b = nodes[s.b]!;
-      const dx = b.x - a.x;
-      const dz = b.z - a.z;
-      const len2 = dx * dx + dz * dz;
-      const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
-      const px = a.x + dx * t;
-      const pz = a.z + dz * t;
-      const d = Math.hypot(x - px, z - pz);
-      if (d < bestD) { bestD = d; best = { seg: i, x: px, z: pz }; }
-    });
-    return best;
+    const found = segmentGrid.nearest(x, z, (i) => onSegment(i, x, z).d);
+    if (!found) return { seg: -1, x, z };
+    const at = onSegment(found.id, x, z);
+    return { seg: found.id, x: at.x, z: at.z };
   };
 
   const route = (x: number, z: number, gx: number, gz: number, heading?: number): { x: number; z: number }[] | null => {
@@ -131,14 +146,14 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     for (const s of [segments[from.seg]!.a, segments[from.seg]!.b]) {
       for (const e of [segments[to.seg]!.a, segments[to.seg]!.b]) {
         const behind = heading !== undefined && (nodes[s]!.x - x) * Math.sin(heading) + (nodes[s]!.z - z) * Math.cos(heading) < 0;
-        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s]![e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
+        const cost = Math.hypot(nodes[s]!.x - from.x, nodes[s]!.z - from.z) + dist[s * count + e]! + Math.hypot(nodes[e]!.x - to.x, nodes[e]!.z - to.z) + (behind ? U_TURN_M : 0);
         if (cost < bestCost) { bestCost = cost; bestS = s; bestE = e; }
       }
     }
     if (bestS < 0) return null;
     const path = [{ x: nodes[bestS]!.x, z: nodes[bestS]!.z }];
     for (let at = bestS; at !== bestE;) {
-      at = next[at]![bestE]!;
+      at = next[at * count + bestE]!;
       path.push({ x: nodes[at]!.x, z: nodes[at]!.z });
     }
     path.push({ x: to.x, z: to.z });
