@@ -1,0 +1,46 @@
+- id: WRECK-T14
+  title: Build a playable city from live OpenStreetMap vector tiles for any picked place, cached on the device, with no invented geometry
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - package.json
+    - package-lock.json
+    - src/maps/live-tiles.ts
+    - src/maps/tile-city.ts
+    - src/maps/city-cache.ts
+    - src/maps/midtown.ts
+    - tests/unit/tile-city.test.ts
+    - tests/fixtures/tiles/midtown-z14.json
+  status: queued
+  attempts: 0
+  rationale: "Operator 2026-11-24T15:54Z: \"ensure we are using real open map data to draw the locations. The start screen should allow you to find a location on a map to play in.\" Today the only city is one pinned Midtown snapshot compiled at build time. A place picked at runtime needs map data fetched from the browser, from a source whose terms allow it."
+  design: |
+    INVARIANT real-data-only: every building, road and park in a live city comes from the fetched vector tiles; when tiles cannot be fetched or hold no roads, the game says so and offers the pinned Midtown city, and never generates stand-in geometry.
+    Source: OpenFreeMap's public vector tiles (OpenMapTiles schema, OpenStreetMap data, no API key; read the tile URL from https://tiles.openfreemap.org/planet). Respect its terms and show "© OpenMapTiles © OpenStreetMap contributors" in game.
+    1. src/maps/live-tiles.ts fetches the z14 tiles covering a square of about 700 m around the picked point (at most 4 tiles), decodes them with @mapbox/vector-tile and pbf, and returns typed features. Fetches run in parallel with a timeout and one retry; no request repeats while a cached copy exists.
+    2. src/maps/tile-city.ts converts features to the existing CityData: building footprints with heights from render_height (and render_min_height), with a labelled default where absent; roads from the transportation layer with widths by class; parks and water; local metric coordinates from the picked point; the same validation compileCity uses (non-finite and self-intersecting rings rejected and counted). A city with no drivable road graph or no spawn is refused with a reason.
+    3. src/maps/city-cache.ts keeps built cities in IndexedDB keyed by rounded point and tile version, so a place plays offline after its first load.
+    4. The game loads a live city through loadLiveCity( from src/maps/tile-city.ts, called in src/maps/midtown.ts beside the pinned loader, so the existing world, combat and render code consume it unchanged.
+    5. Tests use a committed fixture of real decoded tile features for Midtown (tests/fixtures/tiles/midtown-z14.json, captured once from OpenFreeMap with its URL and date in the file).
+  acceptance:
+    - claim: "invariant:real-data-only — a live city's buildings and roads all come from the tile features, and a failed fetch offers the pinned city without generating geometry"
+      proof: "unit test: WRECK-T14: a live city uses only tile features and a failed fetch falls back to the pinned city"
+    - claim: "Building heights come from render_height, then a labelled default"
+      proof: "unit test: WRECK-T14: tile building heights come from render_height then a labelled default"
+    - claim: "A tile city with no drivable roads is refused with a reason"
+      proof: "unit test: WRECK-T14: a tile city with no roads is refused with a reason"
+    - claim: "A built city is cached and reloaded without a network fetch"
+      proof: "unit test: WRECK-T14: a cached city reloads without fetching"
+    - claim: "The game can load a live city"
+      proof: "grep: loadLiveCity( in src/maps/midtown.ts"
+  falsifier: Generate filler buildings when tiles fail and criterion 1 fails; ignore render_height and criterion 2 fails; skip the cache and criterion 4 fails.
+  note: Filed by the operator session 2026-11-24 after the operator asked for a map-picked start and real map data everywhere.
