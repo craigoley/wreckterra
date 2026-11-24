@@ -297,7 +297,9 @@ describe("WRECK-T10: original arena combat match", () => {
     render(createElement(App));
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("100");
     expect(screen.getByRole("group", { name: "Weapon controls" })).toBeTruthy();
-    for (const name of ["Fire gun", "Missile", "Special", "Gas", "◀ Left"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+    // WRECK-T16 replaced the hold buttons with a steering pad and three thumb weapons.
+    expect(screen.getByRole("group", { name: /Steering pad/ })).toBeTruthy();
+    for (const name of ["Fire", "Missile", "Special"]) expect(screen.getByRole("button", { name })).toBeTruthy();
     expect(screen.getByText("Missiles 4/8")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     expect(screen.getByRole("meter", { name: "Your health" }).getAttribute("aria-valuenow")).toBe("100");
