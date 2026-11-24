@@ -1,0 +1,40 @@
+- id: WRECK-T13
+  title: Keep the real-city match fast on a phone and the bots on the streets, restoring the bars the first city build lowered
+  repo: wreckterra
+  depends_on: []
+  priority: 1
+  type: implement
+  verify: auto
+  principles:
+    tdd: strict
+  budget_usd: 30
+  risk: high
+  band_meaning: span
+  origin: operator-request#wreckterra-console-product-2026-10-25
+  files:
+    - src/maps/spatial-index.ts
+    - src/maps/midtown.ts
+    - src/sim/bots.ts
+    - src/sim/combat.ts
+    - tests/unit/city-combat.test.ts
+    - tests/unit/city-compiler.test.ts
+  status: queued
+  attempts: 0
+  rationale: "Measured 2026-11-24 after WRECK-T12 (#28) moved combat onto the real Midtown extract (256 buildings, 73 roads): bots stayed on the streets 83% of the time against the test's own 90% bound, and a seeded 5-minute match took about 25 s to simulate on CI, so the fix round lowered the bound to 0.7 and raised the timeouts to 120 s and 360 s. On a desktop Mac in Chrome the live game holds 60 fps with about 2.9 ms of script per frame; a phone has far less headroom."
+  design: |
+    INVARIANT bars-restored: the city tests run under vitest's default 5 s timeout again and bots stay on the street at least 90% of sampled ticks, with no rule of the match changed.
+    1. src/maps/spatial-index.ts: a uniform grid over building footprints and road segments, built once per city. Car collision, the on-road test, bot line of sight and bot steering query only the cells they touch instead of every building and segment.
+    2. Bots follow lane centres of the street graph between waypoints (look-ahead steering with braking into turns), rejoin the nearest lane after a collision or a reverse-out, and leave the street only to grab a pickup on the kerb.
+    3. Remove HEAVY_TIMEOUT_MS from tests/unit/city-combat.test.ts and the 60 s timeout from the drive test in tests/unit/city-compiler.test.ts; restore the street bound to 0.9.
+    4. A seeded 5-minute match simulates in under 2 s in the unit test run, measured and asserted in the test.
+  acceptance:
+    - claim: "invariant:bars-restored — bots stay on the street in at least 90% of sampled ticks across seeds"
+      proof: "unit test: WRECK-T13: bots keep to the streets at least ninety percent of the time"
+    - claim: "A seeded 5-minute city match simulates in under 2 seconds"
+      proof: "unit test: WRECK-T13: a five-minute city match simulates in under two seconds"
+    - claim: "The spatial index returns the same contacts as checking every building"
+      proof: "unit test: WRECK-T13: the spatial index finds the same contacts as a full scan"
+    - claim: "The city tests carry no raised timeouts"
+      proof: "grep: WRECK-T13 timeouts restored in tests/unit/city-combat.test.ts"
+  falsifier: Remove the index and criterion 2 fails; steer bots straight at the player and criterion 1 fails; return a cell's neighbours only and criterion 3 fails.
+  note: Filed by the operator session 2026-11-24 after WRECK-T12 shipped with lowered test bars.
