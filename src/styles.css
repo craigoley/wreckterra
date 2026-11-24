@@ -31,15 +31,18 @@
 .banner { margin: .5rem 0 0; padding: .6rem; text-align: center; font-weight: 700; border-radius: 8px; }
 .banner-won { background: #1f3a26; color: #9be8b0; }
 .banner-lost { background: #3d1f1a; color: #ffb09f; }
-.controls { display: grid; gap: .5rem; max-width: 32rem; margin: .5rem auto 0; }
-.pad { display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem; }
-.pad-weapons { grid-template-columns: repeat(3, 1fr); }
-.hold { min-height: 3.5rem; border-radius: 12px; border: 2px solid #47604c; background: #18201a; color: inherit; font: inherit; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.hold:active { background: #2b3d31; }
-.hold-brake { grid-column: 1 / -1; }
-.hold-fire { border-color: #e8b64a; }
-.hold-missile { border-color: #e8553f; }
-.hold-special { border-color: #7fd4ff; }
+.touch-layer { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; pointer-events: none; z-index: 2; }
+.steer-pad { position: relative; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overflow: hidden; }
+.steer-hint { position: absolute; left: 0; right: 0; bottom: .6rem; text-align: center; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; color: rgba(233, 236, 223, .55); text-shadow: 0 1px 3px rgba(0, 0, 0, .6); pointer-events: none; }
+.steer-ring { position: absolute; left: 0; top: 0; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.steer-ring::before { content: ""; position: absolute; width: 11rem; height: 11rem; margin: -5.5rem 0 0 -5.5rem; border-radius: 50%; border: 2px solid rgba(233, 236, 223, .45); background: rgba(16, 25, 20, .25); }
+.steer-knob { position: absolute; width: 4.5rem; height: 4.5rem; margin: -2.25rem 0 0 -2.25rem; border-radius: 50%; background: rgba(232, 139, 67, .75); border: 2px solid rgba(255, 255, 255, .6); }
+.weapons { position: relative; pointer-events: none; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: .6rem; padding: .6rem; justify-items: end; align-items: end; }
+.action { pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; text-align: center; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; border-radius: 50%; background: rgba(16, 25, 20, .62); color: #fff; padding: 0; }
+.action:active { background: rgba(43, 61, 49, .85); }
+.action-fire { grid-column: 2; grid-row: 2; width: 6.5rem; height: 6.5rem; border: 3px solid #e8b64a; font-size: 1.1rem; }
+.action-missile { grid-column: 1; grid-row: 2; width: 5rem; height: 5rem; border: 3px solid #e8553f; }
+.action-special { grid-column: 2; grid-row: 1; width: 5rem; height: 5rem; border: 3px solid #7fd4ff; }
 @media (prefers-reduced-motion: reduce) { .drive-stage.shake, .lock-on { animation: none; } }
 
 .start { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
