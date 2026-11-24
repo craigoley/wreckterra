@@ -18,6 +18,10 @@ import {
   type Vec2,
 } from "../../src/maps/city-compiler";
 import { CAR_HIT_RADIUS, circleVsFootprint, createCityWorld, hitCircles, loadCity, parseCity } from "../../src/maps/midtown";
+import { angleDelta, chaseShot } from "../../src/game/ChaseCamera";
+import { buildCityGeometry, nextQuality, QUALITY_LEVELS, readControls } from "../../src/game/CityScene";
+import { facadeVariant } from "../../src/game/cityMaterials";
+import { IDLE } from "../../src/game/TouchControls";
 import { CONTRACT_VERSION, TICK_SECONDS } from "../../src/sim/contracts";
 import { createRng } from "../../src/sim/world";
 
@@ -223,5 +227,57 @@ describe("WRECK-T11: real-city compiler and driving", () => {
     expect(city.buildings.length).toBeGreaterThan(20);
     await expect(loadCity("/x", (async () => new Response("no", { status: 404 })) as typeof fetch)).rejects.toThrow(/HTTP 404/);
     await expect(loadCity("/x", (async () => new Response("{}", { status: 200 })) as typeof fetch)).rejects.toThrow(/not usable/);
+  });
+
+  it("WRECK-T11: the 3D city merges into few draw calls with outward walls and upward roofs", () => {
+    const city = parseCity(JSON.parse(cityText));
+    const geometry = buildCityGeometry(city);
+    const meshes = [...geometry.upper, ...geometry.ground, ...geometry.roof].filter(Boolean).length + geometry.roads.length
+      + [geometry.junctions, geometry.sidewalks, geometry.parks].filter(Boolean).length;
+    // 64 buildings and every road, sidewalk and park collapse into a couple of dozen meshes at most.
+    expect(meshes).toBeLessThan(30);
+    expect(meshes).toBeGreaterThan(5);
+    // Every triangle of every building wall winds so that it faces along its stored normal.
+    for (const g of [...geometry.upper, ...geometry.ground, ...geometry.roof]) {
+      if (!g) continue;
+      const pos = g.getAttribute("position");
+      const nor = g.getAttribute("normal");
+      const index = g.getIndex()!;
+      for (let i = 0; i < index.count; i += 3) {
+        const [a, b, c] = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+        const u = [pos.getX(b) - pos.getX(a), pos.getY(b) - pos.getY(a), pos.getZ(b) - pos.getZ(a)];
+        const v = [pos.getX(c) - pos.getX(a), pos.getY(c) - pos.getY(a), pos.getZ(c) - pos.getZ(a)];
+        const cross = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+        const facing = cross[0]! * nor.getX(a) + cross[1]! * nor.getY(a) + cross[2]! * nor.getZ(a);
+        expect(facing).toBeGreaterThanOrEqual(0);
+      }
+    }
+    // The same building always gets the same facade; the palette is actually used.
+    expect(facadeVariant(1234)).toBe(facadeVariant(1234));
+    expect(new Set(city.buildings.map((b) => facadeVariant(b.id))).size).toBeGreaterThan(3);
+    geometry.dispose();
+  });
+
+  it("WRECK-T11: the camera trails the car, quality adapts to frame time and controls map to input", () => {
+    const behind = chaseShot({ x: 10, z: 20, heading: 0, speed: 0 }, 0, 30);
+    expect(behind.position[2]).toBeLessThan(20);
+    expect(behind.position[1]).toBeGreaterThan(2);
+    expect(behind.look[2]).toBeGreaterThan(20);
+    expect(chaseShot({ x: 0, z: 0, heading: 0, speed: 30 }, 0, 30).fov).toBeGreaterThan(behind.fov);
+    expect(angleDelta(3.1, -3.1)).toBeCloseTo(2 * Math.PI - 6.2, 5);
+
+    // Slow frames step quality down at once; sustained fast frames step it up one level at a time.
+    expect(nextQuality(2, 1 / 20, 0)).toEqual({ level: 1, goodWindows: 0 });
+    expect(nextQuality(0, 1 / 20, 0).level).toBe(0);
+    let state = { level: 1, goodWindows: 0 };
+    for (let i = 0; i < 3; i += 1) state = nextQuality(state.level, 1 / 60, state.goodWindows);
+    expect(state.level).toBe(2);
+    expect(nextQuality(QUALITY_LEVELS.length - 1, 1 / 60, 5).level).toBe(QUALITY_LEVELS.length - 1);
+    expect(nextQuality(2, 1 / 45, 2)).toEqual({ level: 2, goodWindows: 0 });
+
+    expect(readControls({ ...IDLE, gas: true, left: true }, null)).toEqual({ steer: -1, throttle: 1, brake: false });
+    const pad = { axes: [0.6], buttons: [{}, {}, {}, { pressed: true }, {}, {}, {}, { value: 0.5 }] };
+    expect(readControls(IDLE, pad)).toEqual({ steer: 0.6, throttle: 0.5, brake: true });
+    expect(readControls({ ...IDLE, right: true }, pad).steer).toBe(1);
   });
 });

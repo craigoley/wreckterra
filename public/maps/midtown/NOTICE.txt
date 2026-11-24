@@ -1,0 +1,36 @@
+Wreckterra: Midtown map data notice
+===================================
+
+What this folder holds
+----------------------
+source.osm.json  The pinned map snapshot the city is compiled from. Its "wreckterra" header records
+                 the kind of snapshot, where it came from (URL), when it was retrieved, the query,
+                 and a SHA-256 of the "elements" array, which a test re-computes.
+city.json        The game's city file, compiled from source.osm.json by src/maps/city-compiler.ts.
+                 It is deterministic: the same snapshot always gives the same bytes.
+
+Source and licence
+------------------
+Real map data comes from OpenStreetMap (https://www.openstreetmap.org/copyright), copyright
+OpenStreetMap contributors, available under the Open Database Licence (ODbL) 1.0
+(https://opendatacommons.org/licenses/odbl/1.0/). Anyone redistributing this data, or a database
+derived from it such as city.json, must keep this attribution and share it under the same licence.
+The game shows "OpenStreetMap contributors" on the page while the city is on screen.
+
+CURRENT STATE OF THE SNAPSHOT: SYNTHETIC STAND-IN
+-------------------------------------------------
+The snapshot committed with this change is NOT OpenStreetMap data. Overpass could not be reached
+from the sandbox that built it, so `node scripts/acquire-midtown.mjs --stand-in` wrote a generated
+street grid (rotated about 29 degrees, Central Park South to West 56th Street, Sixth Avenue to
+Fifth Avenue, with a park edge and generated building lots) in the same JSON shape. Its header says
+kind "synthetic-stand-in", its ids are negative, and it has no URL. It is original to this
+repository and carries no third-party licence.
+
+To replace it with the real extract, run on a networked machine:
+
+    node scripts/acquire-midtown.mjs
+
+That downloads the Overpass extract for the bounding box in the script, pins its URL, retrieval date
+and SHA-256 into source.osm.json, and recompiles city.json. Use `--compile-only` to recompile from
+the pinned file and `--skip-invalid` to drop ways with bad geometry (they are listed in
+city.json under "rejected"). Production never calls Overpass, Nominatim or a tile server.

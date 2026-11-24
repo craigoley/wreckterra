@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArenaScene, fxFromEvents, liveFx, type Fx } from "./game/ArenaScene";
 import { Hud } from "./game/Hud";
 import { IDLE, KEYS, TouchControls, type Held } from "./game/TouchControls";
-import { VehicleScene, VEHICLES, type Vehicle } from "./game/VehicleScene";
+import { CityDrive, VehicleScene, VEHICLES, type Vehicle } from "./game/VehicleScene";
 import { createCombatMatch, PLAYER_ID } from "./sim/combat";
 import { CONTRACT_VERSION, type CombatArenaLayout, type CombatAuthority, type CombatSnapshot } from "./sim/contracts";
 import { startLoop, type LoopHandle } from "./sim/world";
@@ -14,8 +14,7 @@ interface Frame {
   fx: Fx[];
 }
 
-function CombatSurface({ vehicle }: { vehicle: Vehicle }) {
-  const held = useRef<Held>({ ...IDLE });
+function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: Held } }) {
   const loopRef = useRef<LoopHandle | null>(null);
   const restartRef = useRef<() => void>(() => undefined);
   const [layout, setLayout] = useState<CombatArenaLayout | null>(null);
@@ -88,7 +87,7 @@ function CombatSurface({ vehicle }: { vehicle: Vehicle }) {
       restartRef.current = () => undefined;
       clear();
     };
-  }, [vehicle]);
+  }, [vehicle, held]);
 
   if (failure) return <section className="drive" aria-label="Combat arena"><p role="alert" className="drive-error">The combat arena could not start: {failure} Reload the page to try again.</p></section>;
   const player = frame?.snapshot.vehicles.find((v) => v.playerId === PLAYER_ID);
@@ -107,10 +106,14 @@ function CombatSurface({ vehicle }: { vehicle: Vehicle }) {
 export default function App() {
   const [selected, setSelected] = useState(0);
   const vehicle = VEHICLES[selected];
+  // One set of controls (keys, touch pads, gamepad) drives both the city and the arena preview.
+  const held = useRef<Held>({ ...IDLE });
   return <main>
     <header><a className="arcade" href="https://www.oleyarcade.com/">← OleyArcade</a><span className="edition">Garage preview</span></header>
     <section className="intro" aria-labelledby="title"><p className="eyebrow">The world is your arena</p><h1 id="title">WRECK<span>TERRA</span></h1><p className="lede">Take the scenic route.<br/>Leave a wreck.</p></section>
-    <CombatSurface vehicle={vehicle} />
+    <CityDrive vehicle={vehicle} held={held} />
+    <p className="eyebrow" style={{ textAlign: "center" }}>Arena preview · weapons move into the city next</p>
+    <CombatSurface vehicle={vehicle} held={held} />
     <section className="garage" aria-label="Vehicle garage"><VehicleScene vehicle={vehicle} />
       <div className="vehicle-heading"><div><p className="eyebrow">Your ride</p><h2>{vehicle.name}</h2></div><p>{vehicle.role}</p></div>
       <div className="choices" role="group" aria-label="Choose a vehicle">{VEHICLES.map((item, index) => <button key={item.id} type="button" aria-pressed={selected === index} onClick={() => setSelected(index)}><span>{item.name}</span><small>{item.role}</small></button>)}</div>
