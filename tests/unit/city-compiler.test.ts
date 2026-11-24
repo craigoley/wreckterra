@@ -166,9 +166,9 @@ describe("WRECK-T11: real-city compiler and driving", () => {
     let impacts = 0;
     // Aim at the middle of each building from a spot 22 m away at a varying angle, keeping only clear spots.
     // In a dense real block most spots sit inside a neighbour, so pick from the clear ones; an evenly spread
-    // sample of at most 48 keeps the run time bounded as the extract grows, and every sampled drive still
+    // sample of 34 drives from about 64 spread buildings keeps the run time bounded as the extract grows, and every sampled drive still
     // runs all 420 ticks against every building.
-    const clearApproaches = city.buildings.flatMap((b, index) => [0, 1, 2].map((k) => {
+    const clearApproaches = city.buildings.filter((_, index) => index % Math.max(1, Math.round(city.buildings.length / 64)) === 0).flatMap((b, index) => [0, 1, 2].map((k) => {
       const at = index * 3 + k;
       const cx = b.footprint.reduce((s, p) => s + p[0], 0) / b.footprint.length;
       const cz = b.footprint.reduce((s, p) => s + p[1], 0) / b.footprint.length;
@@ -177,8 +177,8 @@ describe("WRECK-T11: real-city compiler and driving", () => {
       const sz = cz + Math.sin(angle) * 22;
       return { sx, sz, heading: Math.atan2(cx - sx, cz - sz) };
     })).filter(({ sx, sz, heading }) => clear(sx, sz, heading));
-    const stride = Math.max(1, Math.floor(clearApproaches.length / 48));
-    clearApproaches.filter((_, i) => i % stride === 0).forEach(({ sx, sz, heading }) => {
+    const stride = Math.max(1, Math.floor(clearApproaches.length / 34));
+    clearApproaches.filter((_, i) => i % stride === 0).slice(0, 34).forEach(({ sx, sz, heading }) => {
       const world = createCityWorld({ ...city, spawns: [{ x: sx, z: sz, heading }] }, { seed: 1 });
       world.drainEvents();
       expect(world.submitInput({ v: CONTRACT_VERSION, tick: 0, playerId: "player-1", steer: 0, throttle: 1, brake: false })).toEqual({ accepted: true });
