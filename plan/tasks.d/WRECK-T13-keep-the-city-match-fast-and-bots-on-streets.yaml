@@ -36,7 +36,7 @@
       proof: "unit test: WRECK-T13: the spatial index finds the same contacts as a full scan"
     - claim: "The city world queries the spatial index for collisions"
       proof: "grep: createSpatialIndex( in src/maps/midtown.ts"
-    - claim: "The city tests carry no raised timeouts"
-      proof: "grep: WRECK-T13 timeouts restored in tests/unit/city-combat.test.ts"
+    - claim: "The city tests carry no raised timeouts (a test reads both city test files and finds no timeout argument above vitest's default)"
+      proof: "unit test: WRECK-T13: the city tests set no raised timeout"
   falsifier: Remove the index and criterion 2 fails; steer bots straight at the player and criterion 1 fails; return a cell's neighbours only and criterion 3 fails.
   note: Filed by the operator session 2026-11-24 after WRECK-T12 shipped with lowered test bars.
