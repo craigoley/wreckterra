@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createSpatialIndex } from "../../src/maps/spatial-index";
 import { createElement } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,7 +12,7 @@ import {
   createCityMatch, GUN_DAMAGE, MATCH_TICKS, MISSILE_DAMAGE, MISSILE_START_AMMO, PICKUP_RESPAWN_TICKS, PLAYER_ID, SPECIAL_COOLDOWN_TICKS,
 } from "../../src/sim/combat";
 import { CONTRACT_VERSION, TICK_RATE, type CombatAuthority, type CombatSnapshot, type SimEvent } from "../../src/sim/contracts";
-import { createCityGeometry } from "../../src/sim/world";
+import { createCityGeometry, createRng } from "../../src/sim/world";
 
 afterEach(cleanup);
 
@@ -256,8 +257,22 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
     expect(idle.snapshot().match).toEqual(lost.match);
     expect(idle.snapshot().vehicles).toEqual(frozen);
 
-    // A fighting player can win: the last car running ends the match as a win.
-    for (const seed of [1, 2, 3]) {
+    // Restart is a fresh match from the same seed, which then replays exactly.
+    const fresh = createCityMatch(city, { seed: 2 }).snapshot();
+    expect(idle.snapshot()).not.toEqual(fresh);
+    idle.restart();
+    expect(idle.snapshot()).toEqual(fresh);
+    expect(idle.snapshot().match).toMatchObject({ status: "running", endedTick: null, botsAlive: 4 });
+    expect(idle.drainEvents().filter((e) => e.kind === "spawned")).toHaveLength(5);
+    const twin = createCityMatch(city, { seed: 2 });
+    for (let i = 0; i < 600; i += 1) { tickOnce(idle); tickOnce(twin); }
+    expect(idle.snapshot()).toEqual(twin.snapshot());
+  });
+
+  // One case per seed, so each match gets its own default time limit.
+  for (const seed of [1, 2, 3]) {
+    it(`WRECK-T12: a fighting player can win a city match (seed ${seed})`, () => {
+      // A fighting player can win: the last car running ends the match as a win.
       const duelNav = createStreetNav(city, geometry);
       const win = createCityMatch(city, { seed, bots: 1 });
       const brain = createBotBrain(99);
@@ -272,11 +287,11 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
       expect(me(won).alive).toBe(true);
       expect(winEvents.filter((e) => e.kind === "match-ended")).toEqual([expect.objectContaining({ status: "won" })]);
       expect(winEvents.some((e) => e.kind === "wrecked" && e.playerId === "bot-1" && e.byId === PLAYER_ID)).toBe(true);
-    }
+    });
 
-    // A fighting player is also decided inside the limit, win or lose.
-    const nav = createStreetNav(city, geometry);
-    for (const seed of [1, 2, 3]) {
+    it(`WRECK-T12: a fighting city match is decided inside the limit (seed ${seed})`, () => {
+      // A fighting player is also decided inside the limit, win or lose.
+      const nav = createStreetNav(city, geometry);
       const fight = createCityMatch(city, { seed });
       const brain = createBotBrain(99);
       for (let i = 0; i < MATCH_TICKS && fight.snapshot().match.status === "running"; i += 1) {
@@ -286,19 +301,8 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
       const end = fight.snapshot().match;
       expect(end.status, `seed ${seed}`).not.toBe("running");
       expect(end.endedTick).toBeLessThanOrEqual(MATCH_TICKS);
-    }
-
-    // Restart is a fresh match from the same seed, which then replays exactly.
-    const fresh = createCityMatch(city, { seed: 2 }).snapshot();
-    expect(idle.snapshot()).not.toEqual(fresh);
-    idle.restart();
-    expect(idle.snapshot()).toEqual(fresh);
-    expect(idle.snapshot().match).toMatchObject({ status: "running", endedTick: null, botsAlive: 4 });
-    expect(idle.drainEvents().filter((e) => e.kind === "spawned")).toHaveLength(5);
-    const twin = createCityMatch(city, { seed: 2 });
-    for (let i = 0; i < 600; i += 1) { tickOnce(idle); tickOnce(twin); }
-    expect(idle.snapshot()).toEqual(twin.snapshot());
-  });
+    });
+  }
 
   it("WRECK-T12: combat events become visible effects", () => {
     const at = { v: CONTRACT_VERSION, tick: 7 } as const;
@@ -323,5 +327,137 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
     expect(screen.getByText("Missiles 4/8")).toBeTruthy();
     expect(screen.getByText("Bots left 4/4")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+  });
+});
+
+describe("WRECK-T13: a fast city match with bots on the streets", () => {
+  it("WRECK-T13: bots keep to the streets at least ninety percent of the time", () => {
+    const nav = createStreetNav(city, geometry);
+    let onStreet = 0;
+    let samples = 0;
+    for (const seed of [11, 12, 13, 14, 15]) {
+      const match = createCityMatch(city, { seed });
+      let seedOn = 0;
+      let seedSamples = 0;
+      for (let i = 0; i < 25 * TICK_RATE && match.snapshot().match.status === "running"; i += 1) {
+        tickOnce(match);
+        const s = match.snapshot();
+        for (const bot of s.vehicles.filter((v) => v.bot && v.alive)) {
+          // Far from the player a bot is travelling, not fighting: that is where it must keep to the road.
+          if (Math.hypot(bot.x - me(s).x, bot.z - me(s).z) <= 30) continue;
+          seedSamples += 1;
+          if (geometry.roadDistance(bot.x, bot.z) < 12) seedOn += 1;
+        }
+      }
+      expect(seedSamples, `seed ${seed}: bots travelled`).toBeGreaterThan(200);
+      expect(seedOn / seedSamples, `seed ${seed}: bots drive the streets`).toBeGreaterThanOrEqual(0.9);
+      onStreet += seedOn;
+      samples += seedSamples;
+    }
+    expect(onStreet / samples).toBeGreaterThanOrEqual(0.9);
+    // Steering is by lane centre: with the car shoved off the street it aims back onto it.
+    const road = city.roads.find((r) => r.name === "West 57th Street")!;
+    const [a, b] = [road.points[1]!, road.points[2]!];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const [ux, uz] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    const centre = { x: a[0] + ux * 40, z: a[1] + uz * 40 };
+    const goal = { x: a[0] + ux * 200, z: a[1] + uz * 200 };
+    const off = { x: centre.x - uz * 6, z: centre.z + ux * 6 };
+    const lane = nav.steer(off.x, off.z, goal.x, goal.z, Math.atan2(ux, uz), 10)!;
+    expect(geometry.roadDistance(lane.x, lane.z)).toBeLessThan(geometry.roadDistance(off.x, off.z));
+  });
+
+  it("WRECK-T13: a five-minute city match simulates in under two seconds", () => {
+    const nav = createStreetNav(city, geometry);
+    const match = createCityMatch(city, { seed: 17 });
+    const brain = createBotBrain(99);
+    const started = performance.now();
+    let ticks = 0;
+    let restarts = 0;
+    while (ticks < MATCH_TICKS) {
+      const s = match.snapshot();
+      // A match decided early starts again from its seed, so five full minutes are always simulated.
+      if (s.match.status !== "running") { match.restart(); restarts += 1; continue; }
+      const command = brain.think({ self: me(s), vehicles: s.vehicles, pickups: s.pickups, layout: match.layout, tick: s.tick, nav });
+      match.submitInput({ v: CONTRACT_VERSION, tick: s.tick, playerId: PLAYER_ID, ...command });
+      match.advance(1 / TICK_RATE);
+      match.drainEvents();
+      ticks += 1;
+    }
+    const elapsedMs = performance.now() - started;
+    expect(ticks).toBe(MATCH_TICKS);
+    expect(restarts).toBeLessThan(5);
+    expect(elapsedMs, `five simulated minutes took ${Math.round(elapsedMs)} ms`).toBeLessThan(2000);
+  });
+
+  it("WRECK-T13: the spatial index finds the same contacts as a full scan", () => {
+    const full = createCityGeometry(city);
+    const rng = createRng(13);
+    const pick = <T,>(items: readonly T[]): T => items[Math.floor(rng() * items.length)]!;
+    // Points hug building walls (where contacts happen) and also wander over open street and park.
+    const around = (): { x: number; z: number } => {
+      if (rng() < 0.25) return { x: city.bounds.minX + rng() * (city.bounds.maxX - city.bounds.minX), z: city.bounds.minZ + rng() * (city.bounds.maxZ - city.bounds.minZ) };
+      const corner = pick(pick(city.buildings).footprint);
+      return { x: corner[0] + (rng() - 0.5) * 24, z: corner[1] + (rng() - 0.5) * 24 };
+    };
+    const disagreements: string[] = [];
+    let touching = 0;
+    let blocked = 0;
+    let open = 0;
+    for (let i = 0; i < 3000; i += 1) {
+      const p = around();
+      const radius = 0.4 + rng() * 5;
+      const contacts = geometry.contacts(p.x, p.z, radius);
+      if (contacts.length > 0) touching += 1;
+      if (JSON.stringify(contacts) !== JSON.stringify(full.contacts(p.x, p.z, radius))) disagreements.push(`contacts ${p.x},${p.z},${radius}`);
+      if (geometry.solidAt(p.x, p.z) !== full.solidAt(p.x, p.z)) disagreements.push(`solid ${p.x},${p.z}`);
+      if (geometry.onRoad(p.x, p.z) !== full.onRoad(p.x, p.z)) disagreements.push(`onRoad ${p.x},${p.z}`);
+      if (geometry.wallDistance(p.x, p.z, 9) !== full.wallDistance(p.x, p.z, 9)) disagreements.push(`wall ${p.x},${p.z}`);
+      if (geometry.roadDistance(p.x, p.z) !== full.roadDistance(p.x, p.z)) disagreements.push(`road ${p.x},${p.z}`);
+      const angle = rng() * Math.PI * 2;
+      const [dx, dz] = [Math.sin(angle), Math.cos(angle)];
+      if (geometry.rayCover(p.x, p.z, dx, dz) !== full.rayCover(p.x, p.z, dx, dz)) disagreements.push(`ray ${p.x},${p.z},${angle}`);
+      // The lock test casts a ray whose direction is not a unit vector; the parameter then scales with it.
+      const [sx, sz] = [dx * (1 + rng() * 30), dz * (1 + rng() * 30)];
+      const scaled = geometry.rayCoverWithin(p.x, p.z, sx, sz, Math.hypot(sx, sz));
+      if (Math.hypot(sx, sz) <= scaled !== Math.hypot(sx, sz) <= full.rayCover(p.x, p.z, sx, sz)) disagreements.push(`scaled ${p.x},${p.z},${angle}`);
+      const q = { x: p.x + dx * rng() * 120, z: p.z + dz * rng() * 120 };
+      const sight = geometry.clear(p.x, p.z, q.x, q.z);
+      if (sight !== full.clear(p.x, p.z, q.x, q.z)) disagreements.push(`clear ${p.x},${p.z} to ${q.x},${q.z}`);
+      if (sight) open += 1; else blocked += 1;
+    }
+    expect(disagreements).toEqual([]);
+    // The comparison is not vacuous: it met walls, open lines and blocked ones.
+    expect(touching).toBeGreaterThan(100);
+    expect(blocked).toBeGreaterThan(100);
+    expect(open).toBeGreaterThan(100);
+    // A nearer limit hides a wall that is farther away and keeps one that is closer.
+    const walled = createIndexedGeometry(across([BLOCK]));
+    expect(walled.rayCoverWithin(-30, 0, 1, 0, 10)).toBe(Infinity);
+    expect(walled.rayCoverWithin(-30, 0, 1, 0, 40)).toBeCloseTo(20, 6);
+
+    // The grid on its own: boxes spanning several cells are found once, from any cell they touch.
+    const grid = createSpatialIndex({ minX: 0, maxX: 100, minZ: 0, maxZ: 100 }, 10);
+    grid.insert(0, 5, 5, 45, 15);
+    grid.insert(1, 60, 60, 62, 62);
+    expect(grid.collect(30, 8, 31, 9)).toEqual([0]);
+    expect(grid.collect(0, 0, 100, 100)).toEqual([0, 1]);
+    expect(grid.collect(70, 0, 100, 40)).toEqual([]);
+    expect(grid.nearest(90, 90, (id) => (id === 0 ? 70 : 40))).toEqual({ id: 1, distance: 40 });
+    expect(createSpatialIndex({ minX: 0, maxX: 10, minZ: 0, maxZ: 10 }, 5).nearest(1, 1, () => 0)).toBeNull();
+  });
+
+  it("WRECK-T13: the city tests set no raised timeout", () => {
+    // Any callback closed with a further argument (`}, 60_000);`) is a timeout above vitest's 5 s default.
+    const closing = /^\s*\}\s*,\s*[^;)]+\);\s*$/gm;
+    const knob = ["test", "Timeout"].join("");
+    const raised = ["HEAVY", "TIMEOUT"].join("_");
+    for (const file of ["tests/unit/city-combat.test.ts", "tests/unit/city-compiler.test.ts"]) {
+      const text = readFileSync(file, "utf8");
+      expect(text.match(closing) ?? [], `${file} closes a test with an extra argument`).toEqual([]);
+      expect(text.includes(knob), `${file} configures a timeout`).toBe(false);
+      expect(text.includes(raised), `${file} keeps a heavy timeout constant`).toBe(false);
+      expect(/\{\s*timeout\s*:/.test(text), `${file} passes a timeout option`).toBe(false);
+    }
   });
 });

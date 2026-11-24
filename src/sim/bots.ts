@@ -85,7 +85,7 @@ const DIRECT_M = 26;
 /** The braking a bot plans a corner with, m/s squared: well under what the car can do. */
 const PLANNED_BRAKE = 24;
 /** Cell edge of the street-segment grid, metres. */
-const SNAP_CELL_M = 64;
+const SNAP_CELL_M = 32;
 
 /**
  * Street routing for a city match. Streets are treated as two-way (a wreck-fest ignores one-way
@@ -132,22 +132,28 @@ export function createStreetNav(city: CityData, geometry: CityGeometry): BotNav 
     const b = nodes[s.b]!;
     segmentGrid.insert(i, Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z));
   });
-  const onSegment = (i: number, x: number, z: number): { x: number; z: number; d: number } => {
+  /** Where on street segment `i` the point (x, z) lands, as a fraction of its length. */
+  const along = (i: number, x: number, z: number): number => {
     const a = nodes[segments[i]!.a]!;
     const b = nodes[segments[i]!.b]!;
     const dx = b.x - a.x;
     const dz = b.z - a.z;
     const len2 = dx * dx + dz * dz;
-    const t = len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
-    const px = a.x + dx * t;
-    const pz = a.z + dz * t;
-    return { x: px, z: pz, d: Math.hypot(x - px, z - pz) };
+    return len2 === 0 ? 0 : clamp(((x - a.x) * dx + (z - a.z) * dz) / len2, 0, 1);
+  };
+  const distanceToSegment = (i: number, x: number, z: number): number => {
+    const a = nodes[segments[i]!.a]!;
+    const b = nodes[segments[i]!.b]!;
+    const t = along(i, x, z);
+    return Math.hypot(x - (a.x + (b.x - a.x) * t), z - (a.z + (b.z - a.z) * t));
   };
   const snap = (x: number, z: number): { seg: number; x: number; z: number } => {
-    const found = segmentGrid.nearest(x, z, (i) => onSegment(i, x, z).d);
+    const found = segmentGrid.nearest(x, z, (i) => distanceToSegment(i, x, z));
     if (!found) return { seg: -1, x, z };
-    const at = onSegment(found.id, x, z);
-    return { seg: found.id, x: at.x, z: at.z };
+    const a = nodes[segments[found.id]!.a]!;
+    const b = nodes[segments[found.id]!.b]!;
+    const t = along(found.id, x, z);
+    return { seg: found.id, x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
   };
 
   /** The street path to a goal: the car's own spot on the nearest street, then junctions, then the goal's spot. */

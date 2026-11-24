@@ -522,10 +522,12 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
     const fx = Math.sin(car.heading);
     const fz = Math.cos(car.heading);
     const angleTo = (other: Car): number => Math.abs(Math.atan2(fx * (other.z - car.z) - fz * (other.x - car.x), fx * (other.x - car.x) + fz * (other.z - car.z)));
+    // The direction is not normalised, so the ray's parameter is in car-to-car lengths: the rule is
+    // unchanged, and `gap` is the farthest the ray needs to be followed.
     const visible = (other: Car): boolean => {
       const gap = Math.hypot(other.x - car.x, other.z - car.z);
       return other.alive && other.playerId !== car.playerId && gap <= LOCK_RANGE
-        && (gap < 1e-9 || place.cover(car.x, car.z, (other.x - car.x) / gap, (other.z - car.z) / gap, gap) >= gap);
+        && place.cover(car.x, car.z, other.x - car.x, other.z - car.z, gap) >= gap;
     };
     const kept = carById(car.lockId);
     if (kept && visible(kept) && angleTo(kept) <= LOCK_KEEP_CONE) return;

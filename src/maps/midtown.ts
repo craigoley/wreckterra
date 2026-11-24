@@ -213,7 +213,7 @@ export function createIndexedGeometry(city: CityData): IndexedGeometry {
       for (let i = 0; i < f.ring.length; i += 1) nearest = Math.min(nearest, rayEdge(ox, oz, dx, dz, f.ring[i]!, f.ring[(i + 1) % f.ring.length]!));
       return nearest;
     });
-    return inside ? 0 : nearest;
+    return inside ? 0 : nearest > limit ? Infinity : nearest;
   };
   const rayCover = (ox: number, oz: number, dx: number, dz: number): number => coverWithin(ox, oz, dx, dz, Infinity);
 
