@@ -229,9 +229,7 @@ describe("WRECK-T11: real-city compiler and driving", () => {
     expect(world.submitInput({ v: CONTRACT_VERSION, tick: 0, playerId: "player-1", steer: Number.NaN, throttle: 0, brake: false })).toEqual({ accepted: false, reason: "out-of-range" });
     expect(world.submitInput({ v: 2, tick: 0, playerId: "player-1", steer: 0, throttle: 0, brake: false })).toEqual({ accepted: false, reason: "bad-version" });
     expect(world.advance(30)).toBe(5);
-    // This case simulates ~34 x 420 ticks plus a 3600-tick wander against every building in a dense real
-    // extract, so it is legitimately slower than vitest's 5 s default on a loaded CI worker.
-  }, 60_000);
+  });
 
   it("WRECK-T11: the app loads the compiled city through loadCity and rejects a bad response", async () => {
     const fetched: string[] = [];

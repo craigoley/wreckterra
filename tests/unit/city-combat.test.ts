@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
 import { effectsFromEvents } from "../../src/game/CombatEffects";
 import type { Building, CityData, Spawn } from "../../src/maps/city-compiler";
-import { parseCity } from "../../src/maps/midtown";
+import { createIndexedGeometry, parseCity } from "../../src/maps/midtown";
 import { createBotBrain, createStreetNav, type BotCommand } from "../../src/sim/bots";
 import {
   createCityMatch, GUN_DAMAGE, MATCH_TICKS, MISSILE_DAMAGE, MISSILE_START_AMMO, PICKUP_RESPAWN_TICKS, PLAYER_ID, SPECIAL_COOLDOWN_TICKS,
@@ -16,7 +16,7 @@ import { createCityGeometry } from "../../src/sim/world";
 afterEach(cleanup);
 
 const city: CityData = parseCity(JSON.parse(readFileSync("public/maps/midtown/city.json", "utf8")));
-const geometry = createCityGeometry(city);
+const geometry = createIndexedGeometry(city);
 const IDLE_INPUT: BotCommand = { steer: 0, throttle: 0, brake: false, fire: false, missile: false, special: false };
 
 function tickOnce(match: CombatAuthority, command: Partial<BotCommand> = {}): SimEvent[] {
@@ -25,9 +25,6 @@ function tickOnce(match: CombatAuthority, command: Partial<BotCommand> = {}): Si
   match.advance(1 / TICK_RATE);
   return match.drainEvents();
 }
-
-/** These tests step whole seeded matches tick by tick; a shared CI runner needs far more than vitest's 5 s default. */
-const HEAVY_TIMEOUT_MS = 120_000;
 
 const me = (s: CombatSnapshot) => s.vehicles[0]!;
 
@@ -157,7 +154,7 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
       expect(tickOnce(health, goTo(health.snapshot(), healthRun.pad.x, healthRun.pad.z)).some((e) => e.kind === "pickup")).toBe(false);
     }
     expect(health.snapshot().pickups.find((p) => p.id === healthRun.pad.id)?.ready).toBe(true);
-  }, HEAVY_TIMEOUT_MS);
+  });
 
   it("WRECK-T12: bots hunt the player along the street graph", () => {
     const nav = createStreetNav(city, geometry);
@@ -187,12 +184,11 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
       }
       expect(reached, `seed ${seed}: a bot reached the player`).toBeGreaterThanOrEqual(0);
       // On the way they stay on the streets rather than driving a straight line through blocks.
-      // Wide avenues, kerbs and the odd reverse-out put a few samples past the strip, so allow a margin.
-      expect(onStreet / Math.max(1, samples), `seed ${seed}: bots drive the streets`).toBeGreaterThan(0.7);
+      expect(onStreet / Math.max(1, samples), `seed ${seed}: bots drive the streets`).toBeGreaterThan(0.9);
     }
     // At least some bots had to go round buildings to get a line on the player.
     expect(blockedStarts).toBeGreaterThan(0);
-  }, HEAVY_TIMEOUT_MS);
+  });
 
   it("WRECK-T12: shots do not pass through buildings", () => {
     // Geometry: a ray stops at the near wall, a concave notch really is open, and inside counts as blocked.
@@ -302,7 +298,7 @@ describe("WRECK-T12: fight bots through the real city streets", () => {
     const twin = createCityMatch(city, { seed: 2 });
     for (let i = 0; i < 600; i += 1) { tickOnce(idle); tickOnce(twin); }
     expect(idle.snapshot()).toEqual(twin.snapshot());
-  }, HEAVY_TIMEOUT_MS * 3);
+  });
 
   it("WRECK-T12: combat events become visible effects", () => {
     const at = { v: CONTRACT_VERSION, tick: 7 } as const;
