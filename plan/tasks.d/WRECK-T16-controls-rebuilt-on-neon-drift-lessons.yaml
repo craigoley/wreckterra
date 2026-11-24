@@ -22,6 +22,7 @@
     - src/styles.css
     - tests/unit/controls.test.ts
     - tests/e2e/touch-controls.spec.ts
+    - "src/App.tsx"
   status: queued
   attempts: 0
   rationale: "Operator 2026-11-24T15:54Z: \"have better controls ... Take a look at everything we've done for neon drift and apply lessons, controls, and improvements from it.\" Today touch play is six separate hold buttons (Left, Right, Gas, Reverse, Brake and weapons) below the view. Neon Drift (craigoley/neon-drift, src/input/Controls.ts, src/game/Input.ts, CLAUDE.md) uses one device-agnostic input intent, drag-to-steer from the touch origin with a deadzone and a linear rescale to full lock, rising-edge one-shot actions, menu-driven start, a smoothed follow camera with roll, and all tuning in one constants file."
