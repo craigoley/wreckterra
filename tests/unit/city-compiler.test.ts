@@ -158,7 +158,13 @@ describe("WRECK-T11: real-city compiler and driving", () => {
 
   it("WRECK-T11: the car cannot drive through a building", () => {
     const city = parseCity(JSON.parse(cityText));
-    const inside = (cx: number, cz: number) => city.buildings.some((b) => pointInRing([cx, cz], b.footprint));
+    // Bounding boxes first, then the exact ring test: same answer, without testing every ring every tick.
+    const boxes = city.buildings.map((b) => ({
+      b, minX: Math.min(...b.footprint.map((p) => p[0])), maxX: Math.max(...b.footprint.map((p) => p[0])),
+      minZ: Math.min(...b.footprint.map((p) => p[1])), maxZ: Math.max(...b.footprint.map((p) => p[1])),
+    }));
+    const inside = (cx: number, cz: number) => boxes.some((q) =>
+      cx >= q.minX && cx <= q.maxX && cz >= q.minZ && cz <= q.maxZ && pointInRing([cx, cz], q.b.footprint));
     const clear = (x: number, z: number, heading: number) => hitCircles(x, z, heading).every(([cx, cz]) =>
       city.buildings.every((b) => circleVsFootprint(cx, cz, CAR_HIT_RADIUS, b.footprint) === null));
 
