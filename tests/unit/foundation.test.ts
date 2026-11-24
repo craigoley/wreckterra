@@ -3,9 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createElement, StrictMode } from "react";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "../../src/App";
+import type { LiveCityOutcome } from "../../src/maps/tile-city";
 import { CONTRACT_VERSION, MAX_STEPS_PER_ADVANCE, TICK_RATE } from "../../src/sim/contracts";
 import { activeLoopCount, createWorld, startLoop, type FrameScheduler } from "../../src/sim/world";
 
@@ -109,14 +110,23 @@ describe("WRECK-T1: simulation contract", () => {
     }
   }, 120_000);
 
-  it("WRECK-T1: mount and unmount leave exactly one simulation loop", () => {
+  it("WRECK-T1: mount and unmount leave exactly one simulation loop", async () => {
     const baseline = activeLoopCount();
-    const first = render(createElement(StrictMode, null, createElement(App)));
+    // A match starts only from the start screen: press Play, then take the pinned Midtown the refusal offers.
+    const refuse = async (): Promise<LiveCityOutcome> => ({ ok: false, reason: "offline", fallback: "pinned-midtown", notes: [] });
+    const begin = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Play pinned Midtown" }));
+    };
+    const first = render(createElement(StrictMode, null, createElement(App, { loadCity: refuse })));
+    expect(activeLoopCount()).toBe(baseline);
+    await begin();
     // StrictMode mounts, unmounts and remounts effects: exactly one loop may remain.
     expect(activeLoopCount()).toBe(baseline + 1);
     first.unmount();
     expect(activeLoopCount()).toBe(baseline);
-    const second = render(createElement(App));
+    const second = render(createElement(App, { loadCity: refuse }));
+    await begin();
     expect(activeLoopCount()).toBe(baseline + 1);
     second.unmount();
     expect(activeLoopCount()).toBe(baseline);
