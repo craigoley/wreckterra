@@ -1,4 +1,5 @@
 import { Component, lazy, Suspense, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { createControls, type Controls } from "../input/controls";
 import type { CityData } from "../maps/city-compiler";
 import { CITY_SPEED_SCALE } from "../maps/midtown";
 import { VEHICLE_SPECS } from "../sim/arena";
@@ -11,6 +12,12 @@ export const VEHICLES = [
   { id: "voltage", name: "Voltage", role: "Agile interceptor", color: "#b2cfde", speed: 5, armor: 2 },
 ] as const;
 export type Vehicle = (typeof VEHICLES)[number];
+
+/** The one controls adapter for a match: keyboard, gamepad and touch all arrive as the same intent. */
+export function useDriverControls(): Controls {
+  const [controls] = useState(() => createControls());
+  return controls;
+}
 
 export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {
   return <div className="vehicle-scene">

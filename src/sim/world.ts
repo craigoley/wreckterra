@@ -202,8 +202,11 @@ export interface LoopOptions {
   scheduler?: FrameScheduler;
   /** Called before each advance so the caller can sample controls and submit an input. */
   sample?: (world: LocalAuthority) => void;
-  /** Called after each advance with the newest snapshot. */
-  onFrame?: (snapshot: Snapshot) => void;
+  /**
+   * Called after each advance with the newest snapshot and the number of ticks that advance ran.
+   * Zero ticks means the sampled input was not acted on yet, so one-shot latches must be kept.
+   */
+  onFrame?: (snapshot: Snapshot, ticks: number) => void;
 }
 
 export interface LoopHandle {
@@ -259,8 +262,8 @@ export function startLoop(world: LocalAuthority, options: LoopOptions = {}): Loo
     const elapsed = last === undefined ? 0 : (timeMs - last) / 1000;
     last = timeMs;
     options.sample?.(world);
-    world.advance(elapsed);
-    options.onFrame?.(world.snapshot());
+    const ticks = world.advance(elapsed);
+    options.onFrame?.(world.snapshot(), ticks);
     handle = scheduler.request(frame);
   };
   const cancelPending = (): void => {
