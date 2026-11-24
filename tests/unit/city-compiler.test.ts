@@ -20,7 +20,7 @@ import {
 import { CAR_HIT_RADIUS, circleVsFootprint, createCityWorld, hitCircles, loadCity, parseCity } from "../../src/maps/midtown";
 import { angleDelta, chaseShot } from "../../src/game/ChaseCamera";
 import { buildCityGeometry, nextQuality, QUALITY_LEVELS, readControls } from "../../src/game/CityScene";
-import { facadeVariant } from "../../src/game/cityMaterials";
+import { FACADE_PALETTES, facadeVariant } from "../../src/game/cityMaterials";
 import { IDLE } from "../../src/game/TouchControls";
 import { CONTRACT_VERSION, TICK_SECONDS } from "../../src/sim/contracts";
 import { createRng } from "../../src/sim/world";
@@ -164,7 +164,11 @@ describe("WRECK-T11: real-city compiler and driving", () => {
 
     let drivenInto = 0;
     let impacts = 0;
-    city.buildings.flatMap((b, index) => [0, 1, 2].map((k) => [b, index * 3 + k] as const)).forEach(([b, index]) => {
+    // A fixed, evenly spread sample keeps the drive count bounded as the real extract grows (256 buildings
+    // would mean 768 full drives); every sampled drive still runs all 420 ticks against every building.
+    const approaches = city.buildings.flatMap((b, index) => [0, 1, 2].map((k) => [b, index * 3 + k] as const));
+    const stride = Math.max(1, Math.floor(approaches.length / 60));
+    approaches.filter((_, i) => i % stride === 0).forEach(([b, index]) => {
       // Aim at the middle of the building from a spot 22 m away at a varying angle.
       const cx = b.footprint.reduce((s, p) => s + p[0], 0) / b.footprint.length;
       const cz = b.footprint.reduce((s, p) => s + p[1], 0) / b.footprint.length;
@@ -234,8 +238,11 @@ describe("WRECK-T11: real-city compiler and driving", () => {
     const geometry = buildCityGeometry(city);
     const meshes = [...geometry.upper, ...geometry.ground, ...geometry.roof].filter(Boolean).length + geometry.roads.length
       + [geometry.junctions, geometry.sidewalks, geometry.parks].filter(Boolean).length;
-    // 64 buildings and every road, sidewalk and park collapse into a couple of dozen meshes at most.
-    expect(meshes).toBeLessThan(30);
+    // Draw calls are bounded by materials, not by buildings: at most three meshes per facade palette, one per
+    // road group, and one each for junctions, sidewalks and parks, however many buildings the extract holds.
+    expect(meshes).toBeLessThanOrEqual(FACADE_PALETTES.length * 3 + geometry.roads.length + 3);
+    expect(geometry.roads.length).toBeLessThanOrEqual(12);
+    expect(meshes).toBeLessThan(city.buildings.length / 4);
     expect(meshes).toBeGreaterThan(5);
     // Every triangle of every building wall winds so that it faces along its stored normal.
     for (const g of [...geometry.upper, ...geometry.ground, ...geometry.roof]) {
