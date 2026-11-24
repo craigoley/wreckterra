@@ -47,7 +47,12 @@ function writeSource(receipt, elements) {
 }
 
 async function acquire() {
-  const response = await fetch(URL, { method: "POST", body: new URLSearchParams({ data: QUERY }) });
+  // Overpass refuses requests without a User-Agent (406); send a generic one that names no person.
+  const response = await fetch(URL, {
+    method: "POST",
+    headers: { "User-Agent": "wreckterra-map-acquire/1.0", Accept: "application/json" },
+    body: new URLSearchParams({ data: QUERY }),
+  });
   if (!response.ok) throw new Error(`Overpass answered ${response.status} ${response.statusText}`);
   const body = await response.json();
   const elements = (body.elements ?? [])
