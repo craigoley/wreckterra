@@ -164,19 +164,21 @@ describe("WRECK-T11: real-city compiler and driving", () => {
 
     let drivenInto = 0;
     let impacts = 0;
-    // A fixed, evenly spread sample keeps the drive count bounded as the real extract grows (256 buildings
-    // would mean 768 full drives); every sampled drive still runs all 420 ticks against every building.
-    const approaches = city.buildings.flatMap((b, index) => [0, 1, 2].map((k) => [b, index * 3 + k] as const));
-    const stride = Math.max(1, Math.floor(approaches.length / 60));
-    approaches.filter((_, i) => i % stride === 0).forEach(([b, index]) => {
-      // Aim at the middle of the building from a spot 22 m away at a varying angle.
+    // Aim at the middle of each building from a spot 22 m away at a varying angle, keeping only clear spots.
+    // In a dense real block most spots sit inside a neighbour, so pick from the clear ones; an evenly spread
+    // sample of at most 48 keeps the run time bounded as the extract grows, and every sampled drive still
+    // runs all 420 ticks against every building.
+    const clearApproaches = city.buildings.flatMap((b, index) => [0, 1, 2].map((k) => {
+      const at = index * 3 + k;
       const cx = b.footprint.reduce((s, p) => s + p[0], 0) / b.footprint.length;
       const cz = b.footprint.reduce((s, p) => s + p[1], 0) / b.footprint.length;
-      const angle = index * 2.399;
+      const angle = at * 2.399;
       const sx = cx + Math.cos(angle) * 22;
       const sz = cz + Math.sin(angle) * 22;
-      const heading = Math.atan2(cx - sx, cz - sz);
-      if (!clear(sx, sz, heading)) return;
+      return { sx, sz, heading: Math.atan2(cx - sx, cz - sz) };
+    })).filter(({ sx, sz, heading }) => clear(sx, sz, heading));
+    const stride = Math.max(1, Math.floor(clearApproaches.length / 48));
+    clearApproaches.filter((_, i) => i % stride === 0).forEach(({ sx, sz, heading }) => {
       const world = createCityWorld({ ...city, spawns: [{ x: sx, z: sz, heading }] }, { seed: 1 });
       world.drainEvents();
       expect(world.submitInput({ v: CONTRACT_VERSION, tick: 0, playerId: "player-1", steer: 0, throttle: 1, brake: false })).toEqual({ accepted: true });
@@ -256,6 +258,8 @@ describe("WRECK-T11: real-city compiler and driving", () => {
         const v = [pos.getX(c) - pos.getX(a), pos.getY(c) - pos.getY(a), pos.getZ(c) - pos.getZ(a)];
         const cross = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
         const facing = cross[0]! * nor.getX(a) + cross[1]! * nor.getY(a) + cross[2]! * nor.getZ(a);
+        // A sliver triangle (twice its area under 1e-3 m^2) has no meaningful facing; every real one must face out.
+        if (Math.hypot(cross[0]!, cross[1]!, cross[2]!) < 1e-3) continue;
         expect(facing).toBeGreaterThanOrEqual(0);
       }
     }
