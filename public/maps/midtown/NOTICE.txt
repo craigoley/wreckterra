@@ -17,16 +17,15 @@ OpenStreetMap contributors, available under the Open Database Licence (ODbL) 1.0
 derived from it such as city.json, must keep this attribution and share it under the same licence.
 The game shows "OpenStreetMap contributors" on the page while the city is on screen.
 
-CURRENT STATE OF THE SNAPSHOT: SYNTHETIC STAND-IN
--------------------------------------------------
-The snapshot committed with this change is NOT OpenStreetMap data. Overpass could not be reached
-from the sandbox that built it, so `node scripts/acquire-midtown.mjs --stand-in` wrote a generated
-street grid (rotated about 29 degrees, Central Park South to West 56th Street, Sixth Avenue to
-Fifth Avenue, with a park edge and generated building lots) in the same JSON shape. Its header says
-kind "synthetic-stand-in", its ids are negative, and it has no URL. It is original to this
-repository and carries no third-party licence.
+CURRENT STATE OF THE SNAPSHOT: OPENSTREETMAP EXTRACT
+----------------------------------------------------
+source.osm.json is a real OpenStreetMap extract, downloaded from the Overpass API on 2026-11-24 with the
+query in its header (buildings, highways, the park edge and trees, Central Park South to West 56th Street,
+Sixth Avenue to Fifth Avenue). It holds 5345 elements, SHA-256 of the elements array
+49819f688f6fca3e1dc4949f38aeb2030d0d9c1d9c356f89bf6c782becebec51. city.json compiles to 256 buildings,
+73 roads and 16 spawns, with 0 rejected ways. Copyright OpenStreetMap contributors, ODbL 1.0.
 
-To replace it with the real extract, run on a networked machine:
+To refresh it, run on a networked machine:
 
     node scripts/acquire-midtown.mjs
 
