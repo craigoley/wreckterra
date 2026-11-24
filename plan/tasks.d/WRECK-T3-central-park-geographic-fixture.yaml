@@ -2,7 +2,7 @@
   title: Compile a recognizable bounded Central Park sector from pinned OSM data
   repo: wreckterra
   depends_on:
-    - WRECK-T10
+    - WRECK-T11
   priority: 1.1
   type: implement
   verify: auto
@@ -22,7 +22,9 @@
     - public/maps/central-park/manifest.json
     - public/maps/central-park/NOTICE.txt
     - tests/unit/central-park.test.ts
-  status: queued
+  status: blocked
+  retirement: closed
+  superseded_by: WRECK-T11
   dispatch_hold: true
   attempts: 0
   rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.

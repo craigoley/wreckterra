@@ -2,7 +2,7 @@
   title: Add fair vehicle mastery and interruption-safe local progress
   repo: wreckterra
   depends_on:
-    - WRECK-T4
+    - WRECK-T12
   priority: 1.1
   type: implement
   verify: auto
