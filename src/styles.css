@@ -3,13 +3,41 @@
 .drive { margin: 1rem 0; }
 .drive-stage { position: relative; max-width: 32rem; margin: 0 auto; }
 .drive-stage svg { display: block; width: 100%; height: auto; aspect-ratio: 1; border: 2px solid #47604c; border-radius: 12px; touch-action: none; }
+.drive-stage.shake { animation: shake .12s linear 2; }
+@keyframes shake { 0% { transform: translate(0, 0); } 25% { transform: translate(-3px, 2px); } 75% { transform: translate(3px, -2px); } 100% { transform: translate(0, 0); } }
 .arena-floor { fill: #1a2a20; }
+.arena-wall { stroke: #8da38f; stroke-width: 0.6; }
 .arena-block { fill: #47604c; stroke: #111a16; stroke-width: 0.3; }
-.drive-status, .drive-hint { text-align: center; margin: .5rem 0; }
-.drive-hint { font-size: .85rem; opacity: .8; }
+.car-label { font-size: 1.6px; fill: #e9ecdf; font-weight: 700; }
+.pad-glyph { font-size: 3px; font-weight: 800; }
+.drive-hint { text-align: center; margin: .5rem 0; font-size: .85rem; opacity: .8; }
 .drive-error { padding: 1rem; border: 2px solid #e88b43; border-radius: 12px; }
 .resume { position: absolute; inset: 0; width: 100%; border-radius: 12px; border: 0; background: rgba(8, 13, 10, .85); color: inherit; font: inherit; font-size: 1.1rem; }
-.pad { display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem; max-width: 32rem; margin: 0 auto; }
+.hud { max-width: 32rem; margin: 0 auto .5rem; padding: .5rem .75rem; border: 1px solid #324534; border-radius: 12px; background: #131c16; }
+.hud-critical { border-color: #e8553f; }
+.hud-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.hud-stats { margin-top: .4rem; flex-wrap: wrap; font-size: .8rem; color: #bcc7b8; }
+.hud-health { display: flex; align-items: center; gap: .5rem; flex: 1; min-width: 0; }
+.hud-label { font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: #a9b99f; }
+.meter { flex: 1; height: .8rem; background: #2a1c1a; border-radius: 4px; overflow: hidden; }
+.meter-fill { height: 100%; background: linear-gradient(90deg, #e8553f, #6fd48a); transition: width .1s linear; }
+.hud-critical .meter-fill { background: #e8553f; }
+.hud-value { font-weight: 700; font-size: .85rem; }
+.hud-clock { font-family: 'Barlow Condensed', Impact, sans-serif; font-size: 1.6rem; font-weight: 800; }
+.lock { font-weight: 700; opacity: .6; }
+.lock-on { color: #ff4a3a; opacity: 1; animation: blink .4s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+.restart { min-height: 2.75rem; padding: .4rem 1rem; font-weight: 700; }
+.banner { margin: .5rem 0 0; padding: .6rem; text-align: center; font-weight: 700; border-radius: 8px; }
+.banner-won { background: #1f3a26; color: #9be8b0; }
+.banner-lost { background: #3d1f1a; color: #ffb09f; }
+.controls { display: grid; gap: .5rem; max-width: 32rem; margin: .5rem auto 0; }
+.pad { display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem; }
+.pad-weapons { grid-template-columns: repeat(3, 1fr); }
 .hold { min-height: 3.5rem; border-radius: 12px; border: 2px solid #47604c; background: #18201a; color: inherit; font: inherit; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .hold:active { background: #2b3d31; }
 .hold-brake { grid-column: 1 / -1; }
+.hold-fire { border-color: #e8b64a; }
+.hold-missile { border-color: #e8553f; }
+.hold-special { border-color: #7fd4ff; }
+@media (prefers-reduced-motion: reduce) { .drive-stage.shake, .lock-on { animation: none; } }

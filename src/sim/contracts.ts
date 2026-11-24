@@ -18,6 +18,10 @@ export interface InputCommand {
   /** -1 (reverse) .. 1 (full throttle) */
   throttle: number;
   brake: boolean;
+  /** Optional combat controls; absent means not pressed, so version-1 drive-only inputs stay valid. */
+  fire?: boolean;
+  missile?: boolean;
+  special?: boolean;
 }
 
 export type InputRejection = "bad-shape" | "bad-version" | "out-of-range" | "unknown-player";
@@ -45,9 +49,93 @@ export interface ArenaLayout {
   obstacles: readonly Obstacle[];
 }
 
+export type VehicleKind = "switchback" | "rivet" | "voltage";
+export type WeaponKind = "gun" | "missile" | "special";
+export type SpecialKind = "repair" | "shockwave" | "afterburner";
+export type PickupKind = "health" | "ammo";
+export type MatchStatus = "running" | "won" | "lost";
+export type MatchReason = "last-car-running" | "wrecked" | "time-limit";
+
+type Stamp = { v: typeof CONTRACT_VERSION; tick: number };
+
 export type SimEvent =
-  | { v: typeof CONTRACT_VERSION; tick: number; kind: "spawned"; playerId: string }
-  | { v: typeof CONTRACT_VERSION; tick: number; kind: "impact"; playerId: string; speed: number };
+  | (Stamp & { kind: "spawned"; playerId: string })
+  | (Stamp & { kind: "impact"; playerId: string; speed: number })
+  /** A gun shot from the shooter to where it ended (a target, cover or maximum range). */
+  | (Stamp & { kind: "shot"; playerId: string; x: number; z: number; toX: number; toZ: number })
+  | (Stamp & { kind: "missile-launched"; playerId: string; targetId: string | null })
+  | (Stamp & { kind: "hit"; playerId: string; targetId: string; weapon: WeaponKind; damage: number; x: number; z: number })
+  | (Stamp & { kind: "wrecked"; playerId: string; byId: string | null; x: number; z: number })
+  | (Stamp & { kind: "pickup"; playerId: string; padId: string; pickup: PickupKind })
+  | (Stamp & { kind: "pickup-ready"; padId: string })
+  | (Stamp & { kind: "special"; playerId: string; special: SpecialKind })
+  | (Stamp & { kind: "launch"; playerId: string })
+  | (Stamp & { kind: "match-ended"; status: MatchStatus; reason: MatchReason });
+
+/** A ramp: driving onto it at speed launches the vehicle. */
+export interface Ramp {
+  x: number;
+  z: number;
+  halfX: number;
+  halfZ: number;
+}
+
+export interface PickupPad {
+  id: string;
+  kind: PickupKind;
+  x: number;
+  z: number;
+}
+
+export interface CombatArenaLayout extends ArenaLayout {
+  ramps: readonly Ramp[];
+  pads: readonly PickupPad[];
+}
+
+export interface CombatVehicleState extends VehicleState {
+  kind: VehicleKind;
+  bot: boolean;
+  health: number;
+  maxHealth: number;
+  alive: boolean;
+  missiles: number;
+  maxMissiles: number;
+  special: SpecialKind;
+  /** Ticks until the special is ready again; 0 means ready. */
+  specialCooldown: number;
+  /** The enemy the missile would home on right now, or null when nothing is locked. */
+  lockId: string | null;
+  lastHitTick: number;
+  wreckedTick: number | null;
+  /** Ticks of airtime left after a ramp launch. */
+  airborne: number;
+  /** Ticks of afterburner left. */
+  boost: number;
+}
+
+export interface MissileState {
+  id: number;
+  ownerId: string;
+  x: number;
+  z: number;
+  heading: number;
+  targetId: string | null;
+}
+
+export interface PickupState extends PickupPad {
+  ready: boolean;
+  /** Ticks until the pad is ready again. */
+  respawnTicks: number;
+}
+
+export interface MatchState {
+  status: MatchStatus;
+  reason: MatchReason | null;
+  /** Tick the match ended on, or null while it is running. */
+  endedTick: number | null;
+  timeLimitTicks: number;
+  botsAlive: number;
+}
 
 export interface Snapshot {
   v: typeof CONTRACT_VERSION;
@@ -68,4 +156,19 @@ export interface LocalAuthority {
   snapshot(): Snapshot;
   drainEvents(): SimEvent[];
   dispose(): void;
+}
+
+export interface CombatSnapshot extends Snapshot {
+  vehicles: readonly CombatVehicleState[];
+  missiles: readonly MissileState[];
+  pickups: readonly PickupState[];
+  match: MatchState;
+}
+
+/** A local authority that runs one combat match. */
+export interface CombatAuthority extends LocalAuthority {
+  readonly layout: CombatArenaLayout;
+  snapshot(): CombatSnapshot;
+  /** Begin a fresh match from the same seed and options. */
+  restart(): void;
 }
