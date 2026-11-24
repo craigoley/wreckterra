@@ -44,11 +44,13 @@ function CombatSurface({ vehicle, controls }: { vehicle: Vehicle; controls: Cont
     const clear = () => controls.clear();
     const loop = startLoop(current, {
       sample: (target) => {
-        // Keyboard, gamepad and touch all arrive as one intent; the one-shot weapons are spent once the tick takes them.
+        // Keyboard, gamepad and touch all arrive as one intent.
         target.submitInput(toCommand(controls.sample(), target.snapshot().tick, PLAYER_ID));
-        controls.consume();
       },
-      onFrame: (frame) => {
+      onFrame: (frame, ticks) => {
+        // The one-shot weapons are spent only when a tick actually ran on the sampled intent; a frame that ran no
+        // tick (a high refresh rate, or jitter) keeps the latch, so the next sample still carries the press.
+        if (ticks > 0) controls.consume();
         const next = frame as CombatSnapshot;
         pushEvents(bus.current, current.drainEvents());
         if (next.tick - shownTick >= HUD_EVERY_TICKS || next.tick < shownTick || next.match.status !== shownStatus) {
