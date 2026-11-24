@@ -12,7 +12,6 @@
  * This file imports no tile decoder: `live-tiles.ts` owns pbf, and hands features in.
  */
 import {
-  CityCompileError,
   compileCity,
   project,
   type Bounds,
@@ -263,7 +262,7 @@ export function buildTileCity(tiles: TileSet, center: LatLon, options: { halfSiz
   try {
     compiled = compileCity(snapshot, { invalid: "skip", maxSpawns: 16 });
   } catch (error) {
-    const detail = error instanceof CityCompileError ? error.message : error instanceof Error ? error.message : String(error);
+    const detail = error instanceof Error ? error.message : String(error);
     return refuse(`The map tiles for this place could not be turned into a city (${detail}).`);
   }
   stats.buildings = compiled.buildings.length;
