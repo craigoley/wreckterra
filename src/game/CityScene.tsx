@@ -4,7 +4,8 @@ import { BufferGeometry, Color, DirectionalLight, Float32BufferAttribute, Group,
 import type { Building, CityData, Road, Vec2 } from "../maps/city-compiler";
 import { CITY_PAD_RADIUS } from "../sim/combat";
 import type { CombatAuthority, CombatSnapshot } from "../sim/contracts";
-import { CombatEffects, type EffectsBus } from "./CombatEffects";
+import type { EventBus } from "../sim/world";
+import { CombatEffects } from "./CombatEffects";
 import { ChaseCamera, type ChaseTarget } from "./ChaseCamera";
 import { createCityMaterials, createSkyGeometry, FACADE_PALETTES, facadeVariant, GROUND_FLOOR_M, FLOOR_HEIGHT_M, HAZE, ROAD_TILE_M, TILE_WIDTH_M, type CityMaterials } from "./cityMaterials";
 import type { Held } from "./TouchControls";
@@ -623,7 +624,7 @@ export interface CitySceneProps {
   city: CityData;
   match: CombatAuthority;
   /** Simulation events on their way to the effects. */
-  bus: MutableRefObject<EffectsBus>;
+  bus: MutableRefObject<EventBus>;
   /** Body colour by vehicle kind. */
   colors: Record<string, string>;
   maxSpeed: number;

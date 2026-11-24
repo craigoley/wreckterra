@@ -3,7 +3,7 @@ import type { CityData } from "../maps/city-compiler";
 import { CITY_SPEED_SCALE } from "../maps/midtown";
 import { VEHICLE_SPECS } from "../sim/arena";
 import type { CombatAuthority } from "../sim/contracts";
-import type { EffectsBus } from "./CombatEffects";
+import type { EventBus } from "../sim/world";
 
 export const VEHICLES = [
   { id: "switchback", name: "Switchback", role: "All-rounder", color: "#e88b43", speed: 3, armor: 3 },
@@ -57,7 +57,7 @@ const COLORS: Record<string, string> = Object.fromEntries(VEHICLES.map((v) => [v
  * The 3D view of a running city combat match. The match itself is owned and ticked by the caller;
  * this only draws it, loading the 3D code on demand and falling back to a message without WebGL.
  */
-export function CityBattle({ city, match, bus, vehicle }: { city: CityData; match: CombatAuthority; bus: MutableRefObject<EffectsBus>; vehicle: Vehicle }) {
+export function CityBattle({ city, match, bus, vehicle }: { city: CityData; match: CombatAuthority; bus: MutableRefObject<EventBus>; vehicle: Vehicle }) {
   const [webgl] = useState(webglAvailable);
   const maxSpeed = VEHICLE_SPECS[vehicle.id].maxSpeed * CITY_SPEED_SCALE;
   const body: ReactNode = webgl

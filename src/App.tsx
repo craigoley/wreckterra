@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import cityFile from "../public/maps/midtown/city.json";
-import { type EffectsBus, pushToBus } from "./game/CombatEffects";
 import { Hud } from "./game/Hud";
 import { IDLE, KEYS, TouchControls, type Held } from "./game/TouchControls";
 import { CityBattle, VehicleScene, VEHICLES, type Vehicle } from "./game/VehicleScene";
@@ -8,7 +7,7 @@ import type { CityData } from "./maps/city-compiler";
 import { parseCity } from "./maps/midtown";
 import { createCityMatch, PLAYER_ID } from "./sim/combat";
 import { CONTRACT_VERSION, type CombatAuthority, type CombatSnapshot } from "./sim/contracts";
-import { startLoop, type LoopHandle } from "./sim/world";
+import { pushEvents, startLoop, type EventBus, type LoopHandle } from "./sim/world";
 
 const MATCH_SEED = 20261124;
 /** Redraw the HUD this often (in ticks); the 3D view reads the match every frame regardless. */
@@ -23,7 +22,7 @@ const DISTRICT: { city: CityData } | { error: string } = (() => {
 function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: Held } }) {
   const loopRef = useRef<LoopHandle | null>(null);
   const restartRef = useRef<() => void>(() => undefined);
-  const bus = useRef<EffectsBus>({ events: [] });
+  const bus = useRef<EventBus>({ events: [] });
   const [match, setMatch] = useState<CombatAuthority | null>(null);
   const [snapshot, setSnapshot] = useState<CombatSnapshot | null>(null);
   const [paused, setPaused] = useState(false);
@@ -57,7 +56,7 @@ function CombatSurface({ vehicle, held }: { vehicle: Vehicle; held: { current: H
       },
       onFrame: (frame) => {
         const next = frame as CombatSnapshot;
-        pushToBus(bus.current, current.drainEvents());
+        pushEvents(bus.current, current.drainEvents());
         if (next.tick - shownTick >= HUD_EVERY_TICKS || next.tick < shownTick || next.match.status !== shownStatus) {
           shownTick = next.tick;
           shownStatus = next.match.status;

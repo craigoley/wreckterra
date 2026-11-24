@@ -214,6 +214,17 @@ export interface LoopHandle {
   readonly running: boolean;
 }
 
+/** Events travel from the simulation loop to a renderer through one of these. */
+export interface EventBus { events: SimEvent[] }
+/** Keep the bus from growing while nothing is drawing (no WebGL, a hidden tab). */
+export const EVENT_BUS_LIMIT = 256;
+
+export function pushEvents(bus: EventBus, events: readonly SimEvent[]): void {
+  if (events.length === 0) return;
+  bus.events.push(...events);
+  if (bus.events.length > EVENT_BUS_LIMIT) bus.events.splice(0, bus.events.length - EVENT_BUS_LIMIT);
+}
+
 let liveLoops = 0;
 /** Number of simulation loops currently scheduled; a mount/unmount leak shows up here. */
 export function activeLoopCount(): number {

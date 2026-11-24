@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { AdditiveBlending, BoxGeometry, Color, DynamicDrawUsage, InstancedMesh, MeshBasicMaterial, Object3D, Quaternion, SphereGeometry, Vector3 } from "three";
 import { PLAYER_ID } from "../sim/combat";
 import { TICK_RATE, type CombatSnapshot, type CombatVehicleState, type SimEvent } from "../sim/contracts";
+import type { EventBus } from "../sim/world";
 
 /** A visual the renderer should show for one simulation event. Pure data, so it can be tested without WebGL. */
 export interface Effect {
@@ -43,18 +44,6 @@ export function shakeFromEvents(events: readonly SimEvent[], playerId: string = 
   return shake;
 }
 
-/** Keep the bus from growing while nothing is drawing (no WebGL, a hidden tab). */
-export const BUS_LIMIT = 256;
-
-/** Events travel from the simulation loop to the 3D view through one of these. */
-export interface EffectsBus { events: SimEvent[] }
-
-export function pushToBus(bus: EffectsBus, events: readonly SimEvent[]): void {
-  if (events.length === 0) return;
-  bus.events.push(...events);
-  if (bus.events.length > BUS_LIMIT) bus.events.splice(0, bus.events.length - BUS_LIMIT);
-}
-
 /* ---------------------------------------------------------------- particles */
 
 const GLOW_COUNT = 360;
@@ -84,7 +73,7 @@ interface Burst { life: number; max: number; x: number; y: number; z: number; si
  * wrecks, all drawn with three instanced meshes so a firefight costs a handful of draw calls, and
  * a camera jolt when the player is hit. It must not use a positive useFrame priority: that would take over rendering from R3F. It reads the newest snapshot each frame and drains `bus` for events.
  */
-export function CombatEffects({ live, bus }: { live: MutableRefObject<CombatSnapshot>; bus: MutableRefObject<EffectsBus> }) {
+export function CombatEffects({ live, bus }: { live: MutableRefObject<CombatSnapshot>; bus: MutableRefObject<EventBus> }) {
   const camera = useThree((s) => s.camera);
   const glowMesh = useRef<InstancedMesh>(null);
   const smokeMesh = useRef<InstancedMesh>(null);
