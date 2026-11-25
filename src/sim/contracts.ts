@@ -2,6 +2,8 @@
  * Versioned simulation contracts. Nothing here imports React, the DOM or a renderer, so the same
  * input, event and snapshot shapes can later cross a network boundary unchanged.
  */
+import type { Difficulty } from "./difficulty";
+
 export const CONTRACT_VERSION = 1 as const;
 export const TICK_RATE = 60;
 export const TICK_SECONDS = 1 / TICK_RATE;
@@ -134,6 +136,8 @@ export interface MatchState {
   /** Tick the match ended on, or null while it is running. */
   endedTick: number | null;
   timeLimitTicks: number;
+  /** The difficulty the bots ran under, so a snapshot names its rules. Additive: the contract version is unchanged. */
+  difficulty: Difficulty;
   botsAlive: number;
 }
 

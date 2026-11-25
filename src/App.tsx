@@ -13,6 +13,7 @@ import { createCityMatch, PLAYER_ID } from "./sim/combat";
 import { CONTRACT_VERSION, type CombatAuthority, type CombatSnapshot } from "./sim/contracts";
 import { pushEvents, startLoop, type EventBus, type LoopHandle } from "./sim/world";
 import { createPlaceSearch, type PlaceSearch } from "./ui/place-search";
+import { DIFFICULTIES, type Difficulty } from "./sim/difficulty";
 import { StartScreen, useStartFlow, type MapFactory } from "./ui/StartScreen";
 
 const MATCH_SEED = 20261124;
@@ -41,7 +42,7 @@ async function loadLiveCityInBrowser(point: LatLon, report: (message: string) =>
   });
 }
 
-function CombatSurface({ city, vehicle, controls, onChangePlace }: { city: CityData; vehicle: Vehicle; controls: Controls; onChangePlace: () => void }) {
+function CombatSurface({ city, vehicle, difficulty, controls, onChangePlace }: { city: CityData; vehicle: Vehicle; difficulty: Difficulty; controls: Controls; onChangePlace: () => void }) {
   const loopRef = useRef<LoopHandle | null>(null);
   const restartRef = useRef<() => void>(() => undefined);
   const bus = useRef<EventBus>({ events: [] });
@@ -52,7 +53,7 @@ function CombatSurface({ city, vehicle, controls, onChangePlace }: { city: CityD
 
   useEffect(() => {
     let current: CombatAuthority;
-    try { current = createCityMatch(city, { seed: MATCH_SEED, playerVehicle: vehicle.id }); }
+    try { current = createCityMatch(city, { seed: MATCH_SEED, playerVehicle: vehicle.id, difficulty }); }
     catch (error) { setFailure(error instanceof Error ? error.message : "The combat simulation could not start."); return undefined; }
     setFailure(null);
     setMatch(current);
@@ -113,7 +114,7 @@ function CombatSurface({ city, vehicle, controls, onChangePlace }: { city: CityD
       restartRef.current = () => undefined;
       clear();
     };
-  }, [city, vehicle, controls]);
+  }, [city, vehicle, difficulty, controls]);
 
   if (failure) return <section className="drive" aria-label="Combat city"><p role="alert" className="drive-error">The city fight could not start: {failure} <button type="button" onClick={onChangePlace}>Change place</button></p></section>;
   const player = snapshot?.vehicles.find((v) => v.playerId === PLAYER_ID);
@@ -126,6 +127,7 @@ function CombatSurface({ city, vehicle, controls, onChangePlace }: { city: CityD
       <TouchControls controls={controls} />
       {snapshot && snapshot.match.status !== "running" && <div className="results" role="dialog" aria-label="Match results">
         <p>{snapshot.match.status === "won" ? "Victory" : "Wrecked"}</p>
+        <p className="results-level">Difficulty: {DIFFICULTIES.find((d) => d.id === snapshot.match.difficulty)?.label ?? snapshot.match.difficulty}</p>
         <div className="results-actions"><button type="button" onClick={() => restartRef.current()}>Restart</button><button type="button" onClick={onChangePlace}>Change place</button></div>
       </div>}
       {paused && <button type="button" className="resume" onClick={() => { loopRef.current?.resume(); setPaused(false); }}>Paused — tap to resume</button>}
@@ -154,7 +156,7 @@ export default function App({ loadCity = loadLiveCityInBrowser, search, createMa
   return <main>
     <header><a className="arcade" href="https://www.oleyarcade.com/">← OleyArcade</a><span className="edition">{phase.name === "playing" ? phase.place.name : "Garage preview"}</span></header>
     {phase.name === "playing"
-      ? <CombatSurface city={phase.city} vehicle={vehicle} controls={controls} onChangePlace={flow.changePlace} />
+      ? <CombatSurface city={phase.city} vehicle={vehicle} difficulty={flow.difficulty} controls={controls} onChangePlace={flow.changePlace} />
       : <>
         <section className="intro" aria-labelledby="title"><p className="eyebrow">The world is your arena</p><h1 id="title">WRECK<span>TERRA</span></h1><p className="lede">Take the scenic route.<br/>Leave a wreck.</p></section>
         <StartScreen flow={flow} search={placeSearch} selected={selected} onSelectVehicle={setSelected} createMap={createMap} />

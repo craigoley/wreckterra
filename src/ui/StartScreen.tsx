@@ -13,6 +13,7 @@ import { VehicleScene, VEHICLES, type Vehicle } from "../game/VehicleScene";
 import type { LatLon } from "../maps/city-cache";
 import type { CityData } from "../maps/city-compiler";
 import { LIVE_HALF_SIZE_M, OPENMAPTILES_ATTRIBUTION, type LiveCityOutcome } from "../maps/tile-city";
+import { DEFAULT_MENU_DIFFICULTY, DIFFICULTIES, isDifficulty, type Difficulty } from "../sim/difficulty";
 import type { Place, PlaceSearch } from "./place-search";
 
 /* ------------------------------------------------------------------ places */
@@ -28,7 +29,19 @@ export const RECENT_KEY = "wreckterra.recent-places.v1";
 export const MAX_RECENT = 5;
 export const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 
+export const DIFFICULTY_KEY = "wreckterra.difficulty.v1";
+
 type PlaceStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** The saved difficulty. A missing, unknown or unreadable value is Easy. */
+export function readDifficulty(storage: PlaceStorage | null): Difficulty {
+  try {
+    const value = storage?.getItem(DIFFICULTY_KEY);
+    return isDifficulty(value) ? value : DEFAULT_MENU_DIFFICULTY;
+  } catch {
+    return DEFAULT_MENU_DIFFICULTY;
+  }
+}
 
 function isPlace(value: unknown): value is Place {
   if (typeof value !== "object" || value === null) return false;
@@ -95,6 +108,10 @@ export interface StartFlow {
   phase: FlowPhase;
   picked: PickedPlace;
   recent: Place[];
+  /** The bot difficulty the next match runs on; Easy until the player picks another. */
+  difficulty: Difficulty;
+  /** Choose a difficulty and remember it. Never starts a match. */
+  setDifficulty(level: Difficulty): void;
   pinnedAvailable: boolean;
   pick(place: Place, fly: boolean): void;
   /** Start a match at a place. Called only from the Play button. */
@@ -118,6 +135,7 @@ export function useStartFlow(deps: StartFlowDeps): StartFlow {
   const [phase, setPhase] = useState<FlowPhase>({ name: "start" });
   const [picked, setPicked] = useState<PickedPlace>({ place: MIDTOWN, fly: false });
   const [recent, setRecent] = useState<Place[]>(() => readRecentPlaces(storage.current ?? null));
+  const [difficulty, setDifficultyState] = useState<Difficulty>(() => readDifficulty(storage.current ?? null));
 
   const play = (place: Place) => {
     const mine = (token.current += 1);
@@ -141,6 +159,11 @@ export function useStartFlow(deps: StartFlowDeps): StartFlow {
     phase,
     picked,
     recent,
+    difficulty,
+    setDifficulty: (level) => {
+      setDifficultyState(level);
+      try { storage.current?.setItem(DIFFICULTY_KEY, level); } catch { /* unsaved: the pick still holds for this session */ }
+    },
     pinnedAvailable: deps.pinned !== null,
     pick: (place, fly) => setPicked({ place, fly }),
     play,
@@ -297,6 +320,17 @@ function PlaceSearchBox({ search, onPick }: { search: PlaceSearch; onPick: (plac
   </div>;
 }
 
+function DifficultyPicker({ value, onChange }: { value: Difficulty; onChange: (level: Difficulty) => void }) {
+  return <fieldset className="difficulty" role="radiogroup" aria-label="Difficulty">
+    <legend>Difficulty</legend>
+    {DIFFICULTIES.map((item) => <label key={item.id} className={value === item.id ? "difficulty-option difficulty-picked" : "difficulty-option"}>
+      <input type="radio" name="difficulty" value={item.id} checked={value === item.id} onChange={() => onChange(item.id)} />
+      <span>{item.label}</span>
+      <small>{item.description}</small>
+    </label>)}
+  </fieldset>;
+}
+
 export interface StartScreenProps {
   flow: StartFlow;
   search: PlaceSearch;
@@ -343,6 +377,7 @@ export function StartScreen({ flow, search, selected, onSelectVehicle, createMap
     <section className="garage" aria-label="Vehicle garage"><VehicleScene vehicle={vehicle} />
       <div className="vehicle-heading"><div><p className="eyebrow">Your ride</p><h2>{vehicle.name}</h2></div><p>{vehicle.role}</p></div>
       <div className="choices" role="group" aria-label="Choose a vehicle">{VEHICLES.map((item, index) => <button key={item.id} type="button" aria-pressed={selected === index} onClick={() => onSelectVehicle(index)}><span>{item.name}</span><small>{item.role}</small></button>)}</div>
+      <DifficultyPicker value={flow.difficulty} onChange={flow.setDifficulty} />
       <dl className="stats" aria-live="polite"><div><dt>Speed</dt><dd>{vehicle.speed} / 5</dd></div><div><dt>Armor</dt><dd>{vehicle.armor} / 5</dd></div><div><dt>Arena</dt><dd>{picked.place.name}</dd></div></dl>
     </section>
     <ControlsCard mode={mode} />
