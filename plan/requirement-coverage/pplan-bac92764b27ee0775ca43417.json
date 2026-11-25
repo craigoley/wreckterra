@@ -1,0 +1,81 @@
+{
+  "version": "product-plan-requirement-map-v1",
+  "operationId": "bac92764b27ee0775ca43417546f3430e9f3ec7d4016ee657d4340812dd1553d",
+  "briefDigest": "b5753ff3aa6803ceafdf28c4c339a10d0857acbd42f9a54531709e5074e6484a",
+  "objectiveRevision": 7,
+  "targetHead": "ecd671357d34e4b1ea2024832da10e065f3814ac",
+  "inventoryDigest": "816313f8dfe29dec120ecf86cc754aff69e33affd8629ec7d11d61da2fe196cc",
+  "entries": [
+    {
+      "source": "/idea",
+      "status": "linked",
+      "taskId": "WRECK-T12",
+      "proof": "unit test: WRECK-T12: a city match starts on road spawns and keeps the combat rules"
+    },
+    {
+      "source": "/decisions/0",
+      "status": "deferred",
+      "rationale": "WRECK-T12 and WRECK-T4 specify original vehicles, drivers, names and lore, but whether they are original needs a separate human receipt. No executable proof can show it."
+    },
+    {
+      "source": "/decisions/1",
+      "status": "linked",
+      "taskId": "WRECK-T1",
+      "proof": "unit test: WRECK-T1: the simulation advances fixed ticks independently of React"
+    },
+    {
+      "source": "/decisions/2",
+      "status": "linked",
+      "taskId": "WRECK-T16",
+      "proof": "unit test: WRECK-T16: every device produces the same intent"
+    },
+    {
+      "source": "/decisions/3",
+      "status": "linked",
+      "taskId": "WRECK-T3",
+      "proof": "unit test: WRECK-T3: Central Park preserves pinned geographic identity and source attribution"
+    },
+    {
+      "source": "/decisions/4",
+      "status": "linked",
+      "taskId": "WRECK-T15",
+      "proof": "unit test: WRECK-T15: a picked point is passed to the live city loader"
+    },
+    {
+      "source": "/decisions/5",
+      "status": "linked",
+      "taskId": "WRECK-T5",
+      "proof": "unit test: WRECK-T5: vehicle unlocks preserve sidegrade budgets and geographic access"
+    },
+    {
+      "source": "/decisions/6",
+      "status": "linked",
+      "taskId": "WRECK-T6",
+      "proof": "unit test: WRECK-T6: release checks pin exact arena build and deployment identities"
+    },
+    {
+      "source": "/decisions/7",
+      "status": "linked",
+      "taskId": "WRECK-T6",
+      "proof": "unit test: WRECK-T6: a missing phone or live-route receipt cannot read as verified"
+    },
+    {
+      "source": "/decisions/8",
+      "status": "linked",
+      "taskId": "WRECK-T2",
+      "proof": "unit test: WRECK-T2: hidden pages pause and tap resume runs no catch-up burst"
+    },
+    {
+      "source": "/decisions/9",
+      "status": "linked",
+      "taskId": "WRECK-T18",
+      "proof": "unit test: WRECK-T18: the start screen defaults to easy"
+    },
+    {
+      "source": "/decisions/10",
+      "status": "linked",
+      "taskId": "WRECK-T18",
+      "proof": "unit test: WRECK-T18: a still player survives longer on easier levels"
+    }
+  ]
+}
