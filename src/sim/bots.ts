@@ -1,4 +1,5 @@
 import { lineClear } from "./arena";
+import { difficultyRules, type BotRules } from "./difficulty";
 import type { CombatArenaLayout, CombatVehicleState, PickupState } from "./contracts";
 import type { CityData } from "../maps/city-compiler";
 import { createSpatialIndex } from "../maps/spatial-index";
@@ -47,10 +48,7 @@ export interface BotBrain {
   think(view: BotView): BotCommand;
 }
 
-/** Bots close in for this long before they open fire, so a new match starts with a beat to react. */
-export const BOT_GRACE_TICKS = 240;
 const GUN_RANGE = 30;
-const GUN_ALIGNMENT = 0.14;
 const LOW_HEALTH = 0.4;
 const COVER_TICKS = 150;
 const COVER_COOLDOWN_TICKS = 600;
@@ -254,9 +252,10 @@ function cornerSpeed(angle: number): number {
 /**
  * A bot driver: chases the nearest threat (favouring the player), weaves while it fires, grabs
  * pickups when hurt or empty, ducks behind cover when badly hurt, and backs out when stuck.
- * All randomness comes from the seed it was built with, so a seeded match replays exactly.
+ * All randomness comes from the seed it was built with, so a seeded match replays exactly. The rules
+ * (a difficulty level) set how soon it fires, how true it aims and how often it launches a missile.
  */
-export function createBotBrain(seed: number): BotBrain {
+export function createBotBrain(seed: number, rules: BotRules = difficultyRules()): BotBrain {
   const rng = createRng(seed);
   let weaveUntil = 0;
   let weaveDir = 1;
@@ -395,11 +394,11 @@ export function createBotBrain(seed: number): BotBrain {
       if (command.throttle > 0.2 && Math.abs(self.speed) < 1.5) stuck += 1;
       else stuck = Math.max(0, stuck - 2);
 
-      if (target && tick >= BOT_GRACE_TICKS) {
+      if (target && tick >= rules.botGraceTicks) {
         const aim = wrap(Math.atan2(target.x - self.x, target.z - self.z) - self.heading);
         const clear = lineOk(self.x, self.z, target.x, target.z);
-        command.fire = distance < GUN_RANGE && Math.abs(aim) < GUN_ALIGNMENT && clear;
-        command.missile = self.missiles > 0 && self.lockId !== null && distance > 9 && rng() < 0.05;
+        command.fire = distance < GUN_RANGE && Math.abs(aim) < rules.botGunAlignment && clear;
+        command.missile = self.missiles > 0 && self.lockId !== null && distance > 9 && rng() < rules.botMissileChance;
         command.special =
           self.specialCooldown === 0 &&
           (self.special === "repair" ? healthFraction < 0.55 : self.special === "shockwave" ? distance < 9 : distance > 18 || lowHealth);

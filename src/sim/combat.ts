@@ -1,4 +1,5 @@
 import { ARENA, SPAWNS, VEHICLE_KINDS, VEHICLE_SPECS, rayCover, type Spawn } from "./arena";
+import { difficultyRules, DEFAULT_MATCH_DIFFICULTY, type Difficulty } from "./difficulty";
 import { createBotBrain, createStreetNav, type BotBrain, type BotCommand, type BotNav } from "./bots";
 import {
   CONTRACT_VERSION,
@@ -53,10 +54,7 @@ const MISSILE_LIFE_TICKS = 150;
 const LOCK_RANGE = 55;
 const LOCK_CONE = 0.4;
 const LOCK_KEEP_CONE = 0.7;
-/** Bots hit softer than the player so four of them are a threat, not an instant loss. */
-export const BOT_DAMAGE_SCALE = 0.45;
 const PLAYER_SPREAD = 0.02;
-const BOT_SPREAD = 0.045;
 const DRAG = 0.6;
 const BRAKE_DECELERATION = 26;
 const WALL_SPEED_KEPT = 0.35;
@@ -75,6 +73,8 @@ export interface CombatOptions {
   playerVehicle?: VehicleKind;
   /** Number of bot opponents, 0 to 4. Defaults to 4. */
   bots?: number;
+  /** How hard the bots fight. Omitted means Normal, the rules before levels existed. */
+  difficulty?: Difficulty;
 }
 
 interface Rocket extends MissileState {
@@ -287,6 +287,9 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
   const playerKind = options.playerVehicle ?? "switchback";
   const botCount = Math.max(0, Math.min(MAX_BOTS, Math.floor(options.bots ?? MAX_BOTS)));
   const layout = place.layout;
+  const difficulty = options.difficulty ?? DEFAULT_MATCH_DIFFICULTY;
+  // Bots hit softer than the player so four of them are a threat, not an instant loss; the level sets how much.
+  const rules = difficultyRules(difficulty);
 
   let rng = createRng(seed);
   let cars: Car[] = [];
@@ -338,7 +341,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
     for (let i = 0; i < botCount; i += 1) {
       const kind = VEHICLE_KINDS[Math.floor(rng() * VEHICLE_KINDS.length)]!;
       cars.push(makeCar(`bot-${i + 1}`, kind, true, starts[i + 1]!));
-      brains.push(createBotBrain(seed + 7919 * (i + 1)));
+      brains.push(createBotBrain(seed + 7919 * (i + 1), rules));
     }
     pickups = layout.pads.map((pad) => ({ ...pad, ready: true, respawnTicks: 0 }));
     emit({ v: CONTRACT_VERSION, tick: 0, kind: "spawned", playerId: PLAYER_ID });
@@ -545,7 +548,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
   }
 
   function fireGun(car: Car): void {
-    const heading = car.heading + (rng() * 2 - 1) * (car.bot ? BOT_SPREAD : PLAYER_SPREAD);
+    const heading = car.heading + (rng() * 2 - 1) * (car.bot ? rules.botSpread : PLAYER_SPREAD);
     const dx = Math.sin(heading);
     const dz = Math.cos(heading);
     const ox = car.x + dx * 1.5;
@@ -564,7 +567,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
       victim = other;
     }
     emit({ v: CONTRACT_VERSION, tick, kind: "shot", playerId: car.playerId, x: ox, z: oz, toX: ox + dx * reach, toZ: oz + dz * reach });
-    if (victim) damage(victim, GUN_DAMAGE * (car.bot ? BOT_DAMAGE_SCALE : 1), car.playerId, "gun", ox + dx * reach, oz + dz * reach);
+    if (victim) damage(victim, GUN_DAMAGE * (car.bot ? rules.botDamageScale : 1), car.playerId, "gun", ox + dx * reach, oz + dz * reach);
   }
 
   function launchMissile(car: Car): void {
@@ -605,7 +608,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
       if (other !== direct && d > SPLASH_RADIUS) continue;
       const falloff = other === direct ? 1 : 1 - 0.6 * (d / SPLASH_RADIUS);
       const owner = carById(missile.ownerId);
-      damage(other, Math.round(MISSILE_DAMAGE * falloff * (owner?.bot ? BOT_DAMAGE_SCALE : 1)), missile.ownerId, "missile", missile.x, missile.z);
+      damage(other, Math.round(MISSILE_DAMAGE * falloff * (owner?.bot ? rules.botDamageScale : 1)), missile.ownerId, "missile", missile.x, missile.z);
     }
   }
 
@@ -750,7 +753,7 @@ function createMatch(place: Place, options: CombatOptions): CombatAuthority {
         })),
         missiles: missiles.map((m) => ({ id: m.id, ownerId: m.ownerId, x: m.x, z: m.z, heading: m.heading, targetId: m.targetId })),
         pickups: pickups.map((p) => ({ ...p })),
-        match: { status, reason, endedTick, timeLimitTicks: MATCH_TICKS, botsAlive: cars.filter((c) => c.bot && c.alive).length },
+        match: { status, reason, endedTick, timeLimitTicks: MATCH_TICKS, difficulty, botsAlive: cars.filter((c) => c.bot && c.alive).length },
       };
     },
     drainEvents() {

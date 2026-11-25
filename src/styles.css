@@ -58,6 +58,15 @@
 .place-search-row button { min-width: 6rem; }
 .place-results { list-style: none; margin: .5rem 0; padding: 0; display: grid; gap: .4rem; }
 .place-results button { width: 100%; }
+.difficulty { margin: 1.25rem 0 0; padding: 0; border: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+.difficulty legend { padding: 0; margin-bottom: .5rem; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: #a9b99f; }
+.difficulty-option { position: relative; display: block; min-height: 4rem; padding: .7rem .6rem; background: #19271e; border: 1px solid #3a4e3e; border-radius: 4px; cursor: pointer; }
+.difficulty-option input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.difficulty-option span { display: block; font-weight: 600; font-size: .9rem; }
+.difficulty-option small { display: block; margin-top: .3rem; font-size: .65rem; color: #afbfaa; }
+.difficulty-picked { border-color: #e88b43; background: #3b2e1f; }
+.difficulty-option:focus-within { outline: 3px solid #f8c27b; outline-offset: 3px; }
+.results-level { font-size: 1rem; font-weight: 600; color: #bcc7b8; }
 .controls-card { padding: .75rem 1rem; border: 1px solid #324534; border-radius: 12px; background: #131c16; }
 .controls-card p { margin: 0; font-size: .9rem; color: #bcc7b8; line-height: 1.5; }
 .play { width: 100%; min-height: 3.5rem; text-align: center; font-size: 1.4rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; background: #e88b43; border-color: #f8c27b; color: #1a1209; }
