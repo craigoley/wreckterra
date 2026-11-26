@@ -20,10 +20,46 @@ export interface LifecycleState {
 
 export const RUNNING: Readonly<LifecycleState> = Object.freeze({ paused: false, graphics: "ok", renderer: 0 });
 
-/** Whatever plays sound. The game has none yet; this is the one place it will be held and released. */
+/** Whatever plays sound; the page lifecycle holds and releases it. */
 export interface AudioPort {
   suspend(): unknown;
   resume(): unknown;
+}
+
+/** An audio port that can be given back, as a Web Audio context can. */
+export interface AudioOutput extends AudioPort {
+  close(): unknown;
+}
+
+function browserAudio(): AudioOutput | null {
+  // Older iPhones only have the prefixed constructor.
+  const scope = globalThis as { AudioContext?: new () => AudioOutput; webkitAudioContext?: new () => AudioOutput };
+  const Context = scope.AudioContext ?? scope.webkitAudioContext;
+  return Context ? new Context() : null;
+}
+
+/**
+ * The page's real audio output. The game plays no sound yet. No context exists until the first
+ * `resume`, which must come from a user gesture; where there is no Web Audio it does nothing.
+ */
+export function createAudioPort(create: () => AudioOutput | null = browserAudio): AudioOutput {
+  let output: AudioOutput | null = null;
+  let closed = false;
+  return {
+    suspend: () => output?.suspend(),
+    resume() {
+      if (closed) return undefined;
+      try { output ??= create(); }
+      catch (error) { console.warn("Audio could not be started; the match carries on without it.", error); }
+      return output?.resume();
+    },
+    close() {
+      closed = true;
+      const open = output;
+      output = null;
+      quietly(open?.close());
+    },
+  };
 }
 
 export interface Timers {
@@ -119,10 +155,11 @@ export function bindPageLifecycle(options: PageLifecycleOptions): PageLifecycle 
     state: () => state,
     resume() {
       if (disposed || doc.hidden || state.graphics !== "ok") return false;
+      // This is the player's gesture, so audio may start here, on a restart during play too.
+      if (options.audio) quietly(options.audio.resume());
       if (!state.paused) return true;
       // The loop forgets its last frame time here, so the time away is never replayed.
       options.loop.resume();
-      if (options.audio) quietly(options.audio.resume());
       change({ paused: false });
       return true;
     },

@@ -6,7 +6,7 @@ import { VEHICLE_SPECS } from "../sim/arena";
 import type { CombatAuthority } from "../sim/contracts";
 import type { EventBus, LoopHandle } from "../sim/world";
 import { bindDrivingInput, createDrivingControls, type DrivingControls } from "./input";
-import { bindPageLifecycle, type LifecycleState, type PageLifecycle } from "./lifecycle";
+import { bindPageLifecycle, createAudioPort, type LifecycleState, type PageLifecycle } from "./lifecycle";
 
 export const VEHICLES = [
   { id: "switchback", name: "Switchback", role: "All-rounder", color: "#e88b43", speed: 3, armor: 3 },
@@ -40,8 +40,9 @@ export function bindMatchRuntime({ controls, match, loop, surface, onChange }: M
     surface,
     onRelease: () => { match.submitInput(toCommand(IDLE_INTENT, match.snapshot().tick, playerId)); },
   });
-  const lifecycle = bindPageLifecycle({ loop, surface, onChange, onPause: () => controls.clear() });
-  return { ...lifecycle, dispose: () => { lifecycle.dispose(); detachInput(); } };
+  const audio = createAudioPort();
+  const lifecycle = bindPageLifecycle({ loop, surface, audio, onChange, onPause: () => controls.clear() });
+  return { ...lifecycle, dispose: () => { lifecycle.dispose(); detachInput(); audio.close(); } };
 }
 
 export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {

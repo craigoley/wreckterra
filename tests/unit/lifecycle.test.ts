@@ -3,7 +3,9 @@ import { createElement, StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/App";
-import { bindPageLifecycle, CONTEXT_RESTORE_TIMEOUT_MS, type LifecycleState } from "../../src/game/lifecycle";
+import { createDrivingControls } from "../../src/game/input";
+import { bindPageLifecycle, CONTEXT_RESTORE_TIMEOUT_MS, createAudioPort, type LifecycleState } from "../../src/game/lifecycle";
+import { bindMatchRuntime } from "../../src/game/VehicleScene";
 import { parseCity } from "../../src/maps/midtown";
 import type { LiveCityOutcome } from "../../src/maps/tile-city";
 import * as combat from "../../src/sim/combat";
@@ -48,6 +50,73 @@ function manualScheduler() {
 }
 
 const FRAME = 1000 / TICK_RATE;
+
+/** Stands in for the browser's Web Audio context, which jsdom lacks, and records every one built. */
+function stubAudioContext(name = "AudioContext") {
+  const built: { suspend: unknown; resume: unknown; close: unknown }[] = [];
+  vi.stubGlobal(name, class {
+    suspend = vi.fn(async () => undefined);
+    resume = vi.fn(async () => undefined);
+    close = vi.fn(async () => undefined);
+    constructor() { built.push(this); }
+  });
+  return built;
+}
+
+/** The runtime exactly as the app binds it: nothing about audio is handed in by the test. */
+function checkRuntimeAudio(): void {
+  const built = stubAudioContext();
+  const match = combat.createCityMatch(city, { seed: 21, bots: 1 });
+  const loop = { pause: vi.fn(), resume: vi.fn(), stop: vi.fn(), running: true };
+  const runtime = bindMatchRuntime({ controls: createDrivingControls({ getGamepads: () => [] }), match, loop, surface: null, onChange: () => undefined });
+  // Neither hiding, coming back, nor a refused resume builds audio: only an accepted gesture does.
+  visibility(true);
+  expect(runtime.resume()).toBe(false);
+  visibility(false);
+  expect(built).toHaveLength(0);
+  expect(runtime.resume()).toBe(true);
+  expect(built).toHaveLength(1);
+  const audio = built[0]!;
+  expect(audio.resume).toHaveBeenCalledTimes(1);
+  // Every interruption suspends it, and coming back never starts it.
+  const interruptions = [() => visibility(true), () => { fireEvent(window, new Event("pagehide")); }, () => runtime.rendererFailed()];
+  interruptions.forEach((interrupt, i) => {
+    interrupt();
+    expect(audio.suspend).toHaveBeenCalledTimes(i + 1);
+    visibility(false);
+    runtime.retry();
+    expect(audio.resume).toHaveBeenCalledTimes(i + 1);
+    expect(runtime.resume()).toBe(true);
+    expect(audio.resume).toHaveBeenCalledTimes(i + 2);
+  });
+  // A restart during play is a gesture too, and one context serves the whole match.
+  expect(runtime.resume()).toBe(true);
+  expect(audio.resume).toHaveBeenCalledTimes(interruptions.length + 2);
+  expect(built).toHaveLength(1);
+  runtime.dispose();
+  expect(audio.close).toHaveBeenCalledTimes(1);
+  expect(runtime.resume()).toBe(false);
+
+  // The prefixed constructor is used where it is the only one, and a closed port stays closed.
+  vi.stubGlobal("AudioContext", undefined);
+  const prefixed = stubAudioContext("webkitAudioContext");
+  const port = createAudioPort();
+  port.resume();
+  port.close();
+  port.resume();
+  expect(prefixed).toHaveLength(1);
+  expect(prefixed[0]!.close).toHaveBeenCalledTimes(1);
+
+  // No Web Audio, or a browser that refuses it, never stops the match.
+  vi.stubGlobal("webkitAudioContext", undefined);
+  const silent = createAudioPort();
+  expect(() => { silent.resume(); silent.suspend(); silent.close(); }).not.toThrow();
+  const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  expect(() => createAudioPort(() => { throw new Error("blocked"); }).resume()).not.toThrow();
+  expect(warned).toHaveBeenCalledTimes(1);
+  warned.mockRestore();
+  vi.unstubAllGlobals();
+}
 
 /** One real match on a hand-cranked loop, bound to this page. */
 function harness() {
@@ -171,6 +240,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
     expect(background.frames.size()).toBe(0);
     background.done();
     setHidden(false);
+    checkRuntimeAudio();
     vi.useFakeTimers();
     const surface = document.createElement("div");
     const canvas2 = document.createElement("canvas");
@@ -191,6 +261,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
     vi.useFakeTimers();
     vi.stubGlobal("WebGL2RenderingContext", class {});
     const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ getExtension: () => null } as never);
+    const audio = stubAudioContext();
     const create = vi.mocked(combat.createCityMatch);
     create.mockClear();
     const refuse = async (): Promise<LiveCityOutcome> => ({ ok: false, reason: "offline", fallback: "pinned-midtown", notes: [] });
@@ -227,8 +298,11 @@ describe("WRECK-T2: solo page lifecycle", () => {
     act(() => visibility(false));
     await run(1_000);
     expect(match.snapshot().tick).toBe(hiddenAt);
+    expect(audio).toHaveLength(0);
     fireEvent.click(resume()!);
     expect(resume()).toBeNull();
+    expect(audio).toHaveLength(1);
+    expect(audio[0]!.resume).toHaveBeenCalledTimes(1);
     await run(100);
     expect(match.snapshot().tick - hiddenAt).toBeGreaterThan(0);
     expect(match.snapshot().tick - hiddenAt).toBeLessThanOrEqual(7);
@@ -236,6 +310,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
     // Context lost and restored: the same match carries on after a tap.
     const first = canvas();
     act(() => { lose(first); });
+    expect(audio[0]!.suspend).toHaveBeenCalledTimes(1);
     const lostAt = match.snapshot().tick;
     expect(resume()).toBeNull();
     await run(1_000);
@@ -265,6 +340,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
 
     // No context to be had at all: the fallback shows, the match is held, and retry asks again.
     cleanup();
+    expect(audio[0]!.close).toHaveBeenCalledTimes(1);
     context.mockReturnValue(null);
     render(createElement(App, { loadCity: refuse }));
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
@@ -278,6 +354,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await run(500);
     expect(dry.snapshot().tick).toBe(0);
+    expect(audio).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Retry the 3D view" }));
     await settle();
     expect(screen.getByRole("alertdialog")).toBeTruthy();

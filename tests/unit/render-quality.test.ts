@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createElement, isValidElement, useState, type ComponentType, type ReactElement, type ReactNode } from "react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CityScene, QUALITY_LEVELS } from "../../src/game/CityScene";
@@ -7,107 +7,124 @@ import { parseCity } from "../../src/maps/midtown";
 import { createCityMatch, PLAYER_ID } from "../../src/sim/combat";
 import { CONTRACT_VERSION, TICK_RATE, type CombatAuthority } from "../../src/sim/contracts";
 
-/** The renderer is stood in for: the Canvas hands over its children, and frames are cranked by hand. */
+/** The renderer is stood in for: it keeps what the Canvas was configured with, and frames are cranked by hand. */
 const fiber = vi.hoisted(() => ({
-  children: [] as unknown[],
+  /** The pixel ratio the renderer was left at after each render of the Canvas. */
+  ratios: [] as number[],
+  shadow: -1,
   frame: null as null | ((state: unknown, delta: number) => void),
-  setDpr: null as null | ((dpr: number) => void),
 }));
-vi.mock("@react-three/fiber", () => ({
-  Canvas: (props: { children: unknown[] }) => { fiber.children = props.children; return null; },
-  useFrame: (callback: (state: unknown, delta: number) => void) => { fiber.frame = callback; },
-  useThree: (select: (state: unknown) => unknown) => select({ setDpr: fiber.setDpr }),
-}));
+vi.mock("@react-three/fiber", async () => {
+  const { isValidElement } = await import("react");
+  return {
+    // As in the library, every render applies the dpr prop, and without one the screen's ratio held to [1, 2].
+    // Of the children only the quality governor is mounted, wired to the scene's own state.
+    Canvas: ({ dpr = [1, 2], children }: { dpr?: number | [number, number]; children: ReactNode[] }) => {
+      const [low, high] = Array.isArray(dpr) ? dpr : [dpr, dpr];
+      fiber.ratios.push(Math.min(Math.max(low, window.devicePixelRatio), high));
+      const child = (name: string) => children.find((node): node is ReactElement<{ shadowSize?: number }> => isValidElement(node) && typeof node.type === "function" && node.type.name === name);
+      fiber.shadow = child("Sun")?.props.shadowSize ?? -1;
+      return child("QualityGovernor") ?? null;
+    },
+    useFrame: (callback: (state: unknown, delta: number) => void) => { fiber.frame = callback; },
+    useThree: () => undefined,
+  };
+});
 // The city's painted textures need a 2D canvas, which jsdom does not draw.
 vi.mock("../../src/game/cityMaterials", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/game/cityMaterials")>(),
   createCityMaterials: () => ({ dispose: () => undefined }),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const city = parseCity(JSON.parse(readFileSync("public/maps/midtown/city.json", "utf8")));
-
-type Governor = ComponentType<{ level: number; onLevel: (level: number) => void }>;
-
-/** The quality governor exactly as the shipped scene mounts it. */
-function shippedGovernor(match: CombatAuthority): Governor {
-  render(createElement(CityScene, { city, match, bus: { current: { events: [] } }, colors: {}, maxSpeed: 30 }));
-  const found = fiber.children.find((child): child is ReactElement => isValidElement(child) && typeof child.type === "function" && child.type.name === "QualityGovernor");
-  expect(found, "the scene mounts a quality governor").toBeTruthy();
-  cleanup();
-  return found!.type as Governor;
-}
 
 const WARM_UP = 90;
 const WINDOW = 60;
 const SMOOTH = 1 / 60;
+const MIDDLING = 1 / 45;
 const SLOW = 1 / 25;
 
-function drive(match: CombatAuthority, device: number, start: number) {
-  const Governor = shippedGovernor(match);
+/** The shipped scene on one screen, past its warm-up. A touch screen starts one level lower. */
+function shipped(match: CombatAuthority, device: number, touch = false) {
+  cleanup();
   Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: device });
-  const ratios: number[] = [];
-  const levels: number[] = [start];
-  fiber.setDpr = (dpr) => { ratios.push(dpr); };
-  function Harness(): ReactNode {
-    const [level, setLevel] = useState(start);
-    return createElement(Governor, { level, onLevel: (next: number) => { levels.push(next); setLevel(next); } });
-  }
-  render(createElement(Harness));
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: touch && query === "(pointer: coarse)" }));
+  fiber.ratios.length = 0;
+  const props = { city, match, bus: { current: { events: [] } }, colors: {}, maxSpeed: 30 };
+  const view = render(createElement(CityScene, props));
+  const ratio = (): number => fiber.ratios.at(-1)!;
   const frames = (count: number, delta: number) => { for (let i = 0; i < count; i += 1) act(() => fiber.frame!({}, delta)); };
+  /** The app redraws its HUD several times a second, which renders the scene and its Canvas again. */
+  const redraw = () => { for (let i = 0; i < 3; i += 1) view.rerender(createElement(CityScene, { ...props })); };
   frames(WARM_UP, SMOOTH);
-  return { ratios, levels, frames, level: () => levels.at(-1)! };
+  /** Frames, then HUD redraws; returns the ratio the renderer is left at. */
+  const play = (count: number, delta: number): number => { frames(count, delta); redraw(); return ratio(); };
+  return { play, ratio, redraw };
 }
+
+/** Each change of ratio, in order: a renderer that is reset between decisions shows up here. */
+const changes = (ratios: readonly number[]): number[] => ratios.filter((r, i) => r !== ratios[i - 1]);
 
 describe("WRECK-T2: render quality", () => {
   it("WRECK-T2: render resolution stays bounded and quality adapts from sustained frame times", () => {
     const match = createCityMatch(city, { seed: 9, bots: 1 });
     const before = match.snapshot();
-    const q = drive(match, 4, 2);
-    // A 4x screen is capped at 2x before the level's own scale.
-    expect(q.ratios).toEqual([2]);
 
-    // One enormous spike inside an otherwise smooth window changes nothing, wherever it lands.
-    for (const at of [0, 30, WINDOW - 1]) {
-      q.frames(at, SMOOTH);
-      q.frames(1, 3);
-      q.frames(WINDOW - 1 - at, SMOOTH);
+    // A few long frames in a window change nothing, wherever they land and however close to slow the rest is.
+    for (const baseline of [SMOOTH, MIDDLING, 1 / 39]) {
+      for (const spikes of [1, 3]) {
+        const q = shipped(match, 4);
+        // A 4x screen is capped at 2x before the level's own scale.
+        expect(q.ratio()).toBe(2);
+        for (const at of [0, 30, WINDOW - spikes]) {
+          q.play(at, baseline);
+          q.play(spikes, 3);
+          q.play(WINDOW - spikes - at, baseline);
+        }
+        expect(Math.min(...fiber.ratios)).toBe(2);
+      }
     }
-    expect(q.levels.filter((level) => level < 2)).toEqual([]);
+
+    // A touch screen: the level's ratio survives every redraw, from the first render and after each step.
+    const phone = shipped(match, 3, true);
+    phone.redraw();
+    expect(changes(fiber.ratios)).toEqual([1.5]);
+    expect(phone.play(WINDOW, SLOW)).toBe(1.1);
+    expect(phone.play(WINDOW * 3, SMOOTH)).toBe(1.5);
+    expect(changes(fiber.ratios)).toEqual([1.5, 1.1, 1.5]);
 
     // Sustained slow frames step down one level per full window, never part-way through one.
-    const q2 = drive(match, 4, 2);
-    q2.frames(WINDOW - 1, SLOW);
-    expect(q2.level()).toBe(2);
-    q2.frames(1, SLOW);
-    expect(q2.level()).toBe(1);
-    q2.frames(WINDOW, SLOW);
-    expect(q2.level()).toBe(0);
-    q2.frames(WINDOW * 5, SLOW);
-    expect(q2.level()).toBe(0);
+    const q = shipped(match, 4);
+    expect(q.play(WINDOW - 1, SLOW)).toBe(2);
+    expect(q.play(1, SLOW)).toBe(1.5);
+    expect(q.play(WINDOW, SLOW)).toBe(1.1);
+    expect(fiber.shadow).toBe(QUALITY_LEVELS[0]!.shadow);
+    expect(q.play(WINDOW * 5, SLOW)).toBe(1.1);
     // Hysteresis: recovery takes three good windows in a row, and a middling one starts the count again.
-    q2.frames(WINDOW * 2, SMOOTH);
-    q2.frames(WINDOW, 1 / 45);
-    q2.frames(WINDOW * 2, SMOOTH);
-    expect(q2.level()).toBe(0);
-    q2.frames(WINDOW, SMOOTH);
-    expect(q2.level()).toBe(1);
-    q2.frames(WINDOW * 30, SMOOTH);
-    expect(q2.level()).toBe(QUALITY_LEVELS.length - 1);
+    q.play(WINDOW * 2, SMOOTH);
+    q.play(WINDOW, MIDDLING);
+    expect(q.play(WINDOW * 2, SMOOTH)).toBe(1.1);
+    expect(q.play(WINDOW, SMOOTH)).toBe(1.5);
+    expect(q.play(WINDOW * 30, SMOOTH)).toBe(2.5);
+    expect(fiber.shadow).toBe(QUALITY_LEVELS.at(-1)!.shadow);
     // Middling frames hold the level either way.
-    q2.frames(WINDOW * 5, 1 / 45);
-    expect(q2.level()).toBe(QUALITY_LEVELS.length - 1);
-    expect(q2.levels).toEqual([2, 1, 0, 1, 2, 3]);
+    expect(q.play(WINDOW * 5, MIDDLING)).toBe(2.5);
+    expect(changes(fiber.ratios)).toEqual([2, 1.5, 1.1, 1.5, 2, 2.5]);
 
-    // Resolution is bounded on every screen at every level.
+    // Resolution is bounded on every screen at every level, redraws included.
     for (const device of [0.5, 1, 3, 8]) {
-      for (let level = 0; level < QUALITY_LEVELS.length; level += 1) {
-        const at = drive(match, device, level);
-        expect(at.ratios[0]).toBeGreaterThanOrEqual(0.5);
-        expect(at.ratios[0]).toBeLessThanOrEqual(2 * 1.25);
-        cleanup();
+      const at = shipped(match, device);
+      for (const [count, delta] of [[2, SLOW], [9, SMOOTH]] as const) {
+        for (let i = 0; i < count; i += 1) at.play(WINDOW, delta);
       }
+      expect(Math.min(...fiber.ratios)).toBeGreaterThanOrEqual(0.5);
+      expect(Math.max(...fiber.ratios)).toBeLessThanOrEqual(2 * 1.25);
+      expect(at.ratio()).toBe(Math.max(0.5, Math.min(device, 2) * 1.25));
     }
 
     // A level is only resolution and shadow detail; the governor never moves the match.
@@ -120,5 +137,5 @@ describe("WRECK-T2: render quality", () => {
     for (let i = 0; i < 4 * TICK_RATE; i += 1) smooth.advance(1 / TICK_RATE);
     for (let i = 0; i < 4 * 20; i += 1) slow.advance(1 / 20);
     expect(slow.snapshot()).toEqual(smooth.snapshot());
-  });
+  }, 60_000);
 });
