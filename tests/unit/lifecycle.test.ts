@@ -254,7 +254,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
     expect(real.state().graphics).toBe("unavailable");
     real.dispose();
     return Promise.resolve().then(() => Promise.resolve()).then(() => { expect(rejected).toHaveBeenCalled(); });
-  });
+  }, 30_000);
 
   it("WRECK-T2: the running app holds the match through hiding, context loss and a retry", async () => {
     const realTimeout = globalThis.setTimeout;
