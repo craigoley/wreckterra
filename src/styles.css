@@ -12,7 +12,7 @@
 .pad-glyph { font-size: 3px; font-weight: 800; }
 .drive-hint { text-align: center; margin: .5rem 0; font-size: .85rem; opacity: .8; }
 .drive-error { padding: 1rem; border: 2px solid #e88b43; border-radius: 12px; }
-.resume { position: absolute; inset: 0; width: 100%; border-radius: 12px; border: 0; background: rgba(8, 13, 10, .85); color: inherit; font: inherit; font-size: 1.1rem; }
+.resume { position: absolute; inset: 0; z-index: 3; width: 100%; text-align: center; border-radius: 12px; border: 0; background: rgba(8, 13, 10, .85); color: inherit; font: inherit; font-size: 1.1rem; }
 .hud { max-width: 32rem; margin: 0 auto .5rem; padding: .5rem .75rem; border: 1px solid #324534; border-radius: 12px; background: #131c16; }
 .hud-critical { border-color: #e8553f; }
 .hud-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
@@ -43,6 +43,11 @@
 .action-fire { grid-column: 2; grid-row: 2; width: 6.5rem; height: 6.5rem; border: 3px solid #e8b64a; font-size: 1.1rem; }
 .action-missile { grid-column: 1; grid-row: 2; width: 5rem; height: 5rem; border: 3px solid #e8553f; }
 .action-special { grid-column: 2; grid-row: 1; width: 5rem; height: 5rem; border: 3px solid #7fd4ff; }
+.action-brake { grid-column: 1; grid-row: 1; width: 5rem; height: 5rem; border: 3px solid #e9ecdf; }
+.assist { position: absolute; top: .5rem; left: .5rem; pointer-events: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; min-height: 2.75rem; padding: .4rem .7rem; font-size: .75rem; font-weight: 700; background: rgba(16, 25, 20, .7); color: #fff; }
+.graphics-fallback { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; justify-items: center; gap: .75rem; padding: 1rem; text-align: center; background: rgba(8, 13, 10, .92); color: #e9ecdf; }
+.graphics-fallback p { margin: 0; max-width: 24rem; }
+.graphics-fallback button { min-height: 3rem; padding: .5rem 1.25rem; text-align: center; font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .drive-stage.shake, .lock-on { animation: none; } }
 
 .start { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
@@ -72,7 +77,7 @@
 .play { width: 100%; min-height: 3.5rem; text-align: center; font-size: 1.4rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; background: #e88b43; border-color: #f8c27b; color: #1a1209; }
 .start-loading, .start-refused { margin-top: 1.5rem; padding: 1rem; border: 1px solid #324534; border-radius: 12px; background: #131c16; }
 .start-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.results { position: absolute; inset: 0; display: grid; place-content: center; gap: .75rem; text-align: center; border-radius: 12px; background: rgba(8, 13, 10, .82); font-size: 1.6rem; font-weight: 800; }
+.results { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; gap: .75rem; text-align: center; border-radius: 12px; background: rgba(8, 13, 10, .82); font-size: 1.6rem; font-weight: 800; }
 .results p { margin: 0; }
 .results-actions { display: flex; gap: .5rem; justify-content: center; }
 .results-actions button { min-height: 3rem; padding: .5rem 1.25rem; font-size: 1rem; text-align: center; }
@@ -82,6 +87,8 @@
 @media (max-width: 600px) and (orientation: portrait) {
   .city-battle { aspect-ratio: auto; height: 64vh; height: 64dvh; max-height: none; }
   .action-fire { width: 5.25rem; height: 5.25rem; font-size: 1rem; }
-  .action-missile, .action-special { width: 4.25rem; height: 4.25rem; font-size: .8rem; }
+  .action-missile, .action-special, .action-brake { width: 4.25rem; height: 4.25rem; font-size: .8rem; }
+  /* The buttons take the width they need, so none is pushed off a narrow screen; steering gets the rest. */
+  .touch-layer { grid-template-columns: minmax(0, 1fr) auto; }
 }
 @media (pointer: coarse) { .drive-hint { display: none; } }

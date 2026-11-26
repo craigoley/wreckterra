@@ -1,10 +1,12 @@
-import { Component, lazy, Suspense, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
-import { createControls, type Controls } from "../input/controls";
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { IDLE_INTENT, toCommand } from "../input/intent";
 import type { CityData } from "../maps/city-compiler";
 import { CITY_SPEED_SCALE } from "../maps/midtown";
 import { VEHICLE_SPECS } from "../sim/arena";
 import type { CombatAuthority } from "../sim/contracts";
-import type { EventBus } from "../sim/world";
+import type { EventBus, LoopHandle } from "../sim/world";
+import { bindDrivingInput, createDrivingControls, type DrivingControls } from "./input";
+import { bindPageLifecycle, type LifecycleState, type PageLifecycle } from "./lifecycle";
 
 export const VEHICLES = [
   { id: "switchback", name: "Switchback", role: "All-rounder", color: "#e88b43", speed: 3, armor: 3 },
@@ -14,9 +16,32 @@ export const VEHICLES = [
 export type Vehicle = (typeof VEHICLES)[number];
 
 /** The one controls adapter for a match: keyboard, gamepad and touch all arrive as the same intent. */
-export function useDriverControls(): Controls {
-  const [controls] = useState(() => createControls());
+export function useDriverControls(): DrivingControls {
+  const [controls] = useState(() => createDrivingControls());
   return controls;
+}
+
+export interface MatchRuntime {
+  controls: DrivingControls;
+  match: CombatAuthority;
+  loop: LoopHandle;
+  /** The element holding the 3D view and the touch controls. */
+  surface: Element | null;
+  onChange: (state: LifecycleState) => void;
+}
+
+/**
+ * Wire one running match to the page: every interruption releases the held controls in the simulation
+ * as well as on screen, and a hidden page or lost graphics holds the match until the player resumes.
+ */
+export function bindMatchRuntime({ controls, match, loop, surface, onChange }: MatchRuntime): PageLifecycle {
+  const playerId = match.snapshot().vehicles[0]!.playerId;
+  const detachInput = bindDrivingInput(controls, {
+    surface,
+    onRelease: () => { match.submitInput(toCommand(IDLE_INTENT, match.snapshot().tick, playerId)); },
+  });
+  const lifecycle = bindPageLifecycle({ loop, surface, onChange, onPause: () => controls.clear() });
+  return { ...lifecycle, dispose: () => { lifecycle.dispose(); detachInput(); } };
 }
 
 export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {
@@ -38,20 +63,30 @@ export function VehicleScene({ vehicle }: { vehicle: Vehicle }) {
   </div>;
 }
 
-const CityScene = lazy(() => import("./CityScene").then((m) => ({ default: m.CityScene })));
+const lazyCityScene = () => lazy(() => import("./CityScene").then((m) => ({ default: m.CityScene })));
+const FirstCityScene = lazyCityScene();
 
-/** Three.js needs WebGL; without it (an old browser, a test DOM) the city view shows a plain message instead. */
+/** Three.js needs WebGL: an old browser, a blocked GPU or a test DOM has no context to give. */
 function webglAvailable(): boolean {
-  return typeof WebGL2RenderingContext !== "undefined" || typeof WebGLRenderingContext !== "undefined";
+  if (typeof WebGL2RenderingContext === "undefined" && typeof WebGLRenderingContext === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    // Hand the probe's context straight back: a phone allows only a few at once.
+    context?.getExtension("WEBGL_lose_context")?.loseContext();
+    return context !== null;
+  } catch (error) {
+    console.warn("WebGL could not be started.", error);
+    return false;
+  }
 }
 
-class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class SceneBoundary extends Component<{ onFailed: () => void; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError(): { failed: boolean } { return { failed: true }; }
+  componentDidCatch(): void { this.props.onFailed(); }
   render(): ReactNode {
-    return this.state.failed
-      ? <p role="alert" style={noteStyle}>The 3D city view could not start on this device. Reload the page to try again.</p>
-      : this.props.children;
+    return this.state.failed ? null : this.props.children;
   }
 }
 
@@ -61,17 +96,37 @@ const stageStyle: CSSProperties = { position: "relative", width: "100%", backgro
 
 const COLORS: Record<string, string> = Object.fromEntries(VEHICLES.map((v) => [v.id, v.color]));
 
+export interface CityBattleProps {
+  city: CityData;
+  match: CombatAuthority;
+  bus: MutableRefObject<EventBus>;
+  vehicle: Vehicle;
+  /** The renderer's health, from the page lifecycle. */
+  page: LifecycleState;
+  onRendererFailed: () => void;
+  onRetry: () => void;
+}
+
 /**
  * The 3D view of a running city combat match. The match itself is owned and ticked by the caller;
- * this only draws it, loading the 3D code on demand and falling back to a message without WebGL.
+ * this only draws it, loading the 3D code on demand. When the view cannot be drawn it offers a retry,
+ * which builds a fresh renderer over the same match.
  */
-export function CityBattle({ city, match, bus, vehicle }: { city: CityData; match: CombatAuthority; bus: MutableRefObject<EventBus>; vehicle: Vehicle }) {
-  const [webgl] = useState(webglAvailable);
+export function CityBattle({ city, match, bus, vehicle, page, onRendererFailed, onRetry }: CityBattleProps) {
+  const { renderer } = page;
+  // Each retry asks the browser again and loads the 3D code afresh.
+  const webgl = useMemo(webglAvailable, [renderer]);
+  const CityScene = useMemo(() => (renderer === 0 ? FirstCityScene : lazyCityScene()), [renderer]);
+  useEffect(() => { if (!webgl) onRendererFailed(); }, [webgl, renderer, match, onRendererFailed]);
   const maxSpeed = VEHICLE_SPECS[vehicle.id].maxSpeed * CITY_SPEED_SCALE;
-  const body: ReactNode = webgl
-    ? <SceneBoundary><Suspense fallback={<p role="status" style={noteStyle}>Loading the 3D view…</p>}>
+  return <div className="city-battle" style={stageStyle}>
+    {webgl && <SceneBoundary key={renderer} onFailed={onRendererFailed}><Suspense fallback={<p role="status" style={noteStyle}>Loading the 3D view…</p>}>
       <CityScene key={vehicle.id} city={city} match={match} bus={bus} colors={COLORS} maxSpeed={maxSpeed} />
-    </Suspense></SceneBoundary>
-    : <p role="status" style={noteStyle}>The 3D city needs WebGL, which this browser is not offering. The match still runs; the garage below still works.</p>;
-  return <div className="city-battle" style={stageStyle}>{body}</div>;
+    </Suspense></SceneBoundary>}
+    {page.graphics === "unavailable" && <div className="graphics-fallback" role="alertdialog" aria-labelledby="graphics-fallback-title" aria-describedby="graphics-fallback-text">
+      <p id="graphics-fallback-title">The 3D view is not available</p>
+      <p id="graphics-fallback-text">The 3D city needs WebGL, which this browser is not offering right now. Your match is paused and kept.</p>
+      <button type="button" autoFocus onClick={onRetry}>Retry the 3D view</button>
+    </div>}
+  </div>;
 }
