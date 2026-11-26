@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import cityFile from "../public/maps/midtown/city.json";
+import { Garage, RewardSummary } from "./game/Garage";
 import { Hud } from "./game/Hud";
 import type { DrivingControls } from "./game/input";
 import { RUNNING, type LifecycleState, type PageLifecycle } from "./game/lifecycle";
@@ -10,12 +11,14 @@ import type { LatLon } from "./maps/city-cache";
 import type { CityData } from "./maps/city-compiler";
 import { parseCity } from "./maps/midtown";
 import { loadLiveCity, type LiveCityOutcome } from "./maps/tile-city";
+import { createProgressStore, saveOnInterruption, type ProgressStore } from "./progress/profile";
+import { awardMatch, newMatchId, type Award } from "./progress/rewards";
 import { createCityMatch, PLAYER_ID } from "./sim/combat";
 import { CONTRACT_VERSION, type CombatAuthority, type CombatSnapshot } from "./sim/contracts";
 import { pushEvents, startLoop, type EventBus } from "./sim/world";
-import { createPlaceSearch, type PlaceSearch } from "./ui/place-search";
+import { createPlaceSearch, type Place, type PlaceSearch } from "./ui/place-search";
 import { DIFFICULTIES, type Difficulty } from "./sim/difficulty";
-import { StartScreen, useStartFlow, type MapFactory } from "./ui/StartScreen";
+import { StartScreen, SUGGESTED_PLACES, useStartFlow, type MapFactory } from "./ui/StartScreen";
 
 const MATCH_SEED = 20261124;
 /** Redraw the HUD this often (in ticks); the 3D view reads the match every frame regardless. */
@@ -43,7 +46,35 @@ async function loadLiveCityInBrowser(point: LatLon, report: (message: string) =>
   });
 }
 
-function CombatSurface({ city, vehicle, difficulty, controls, onChangePlace }: { city: CityData; vehicle: Vehicle; difficulty: Difficulty; controls: DrivingControls; onChangePlace: () => void }) {
+/** The passport name of a curated place; a dropped pin or a search result has none. */
+function passportName(place: Place): string | null {
+  return SUGGESTED_PLACES.find((p) => p.name === place.name && p.lat === place.lat && p.lon === place.lon)?.name ?? null;
+}
+
+/** Reward each play of a match once, as soon as it ends. Returns the reward to show, or null while running. */
+function useMatchReward(progress: ProgressStore, snapshot: CombatSnapshot | null, vehicle: Vehicle, place: Place): Award | null {
+  const playId = useRef<string | null>(null);
+  const [award, setAward] = useState<Award | null>(null);
+  const status = snapshot?.match.status;
+  useEffect(() => {
+    if (!snapshot) return;
+    // A running match is a new play: the next result gets its own id.
+    if (snapshot.match.status === "running") { playId.current = null; setAward(null); return; }
+    playId.current ??= newMatchId();
+    setAward(awardMatch(progress, {
+      matchId: playId.current,
+      vehicle: vehicle.id,
+      status: snapshot.match.status,
+      reason: snapshot.match.reason,
+      ticks: snapshot.match.endedTick ?? snapshot.tick,
+      passport: passportName(place),
+    }));
+    // Keyed on the status alone: later snapshots of an ended match are the same result.
+  }, [status]);
+  return award;
+}
+
+function CombatSurface({ city, place, vehicle, difficulty, controls, progress, onChangePlace }: { city: CityData; place: Place; vehicle: Vehicle; difficulty: Difficulty; controls: DrivingControls; progress: ProgressStore; onChangePlace: () => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<PageLifecycle | null>(null);
   const restartRef = useRef<() => void>(() => undefined);
@@ -52,6 +83,7 @@ function CombatSurface({ city, vehicle, difficulty, controls, onChangePlace }: {
   const [snapshot, setSnapshot] = useState<CombatSnapshot | null>(null);
   const [page, setPage] = useState<LifecycleState>(RUNNING);
   const [failure, setFailure] = useState<string | null>(null);
+  const award = useMatchReward(progress, snapshot, vehicle, place);
 
   useEffect(() => {
     let current: CombatAuthority;
@@ -126,6 +158,7 @@ function CombatSurface({ city, vehicle, difficulty, controls, onChangePlace }: {
       {snapshot && snapshot.match.status !== "running" && <div className="results" role="dialog" aria-label="Match results">
         <p>{snapshot.match.status === "won" ? "Victory" : "Wrecked"}</p>
         <p className="results-level">Difficulty: {DIFFICULTIES.find((d) => d.id === snapshot.match.difficulty)?.label ?? snapshot.match.difficulty}</p>
+        {award && <RewardSummary store={progress} award={award} />}
         <div className="results-actions"><button type="button" onClick={() => restartRef.current()}>Restart</button><button type="button" onClick={onChangePlace}>Change place</button></div>
       </div>}
       {page.paused && page.graphics === "ok" && <button type="button" className="resume" onClick={() => runtimeRef.current?.resume()}>Paused — tap to resume</button>}
@@ -151,13 +184,18 @@ export default function App({ loadCity = loadLiveCityInBrowser, search, createMa
   const [placeSearch] = useState<PlaceSearch>(() => search ?? createPlaceSearch());
   const flow = useStartFlow({ loadCity, pinned: PINNED_CITY });
   const { phase } = flow;
+  // Progress lives here, above the match and its renderer, so neither can take it down with them.
+  const [progress] = useState(() => createProgressStore());
+  useEffect(() => saveOnInterruption(progress), [progress]);
+  const leaveMatch = () => { progress.save(); flow.changePlace(); };
   return <main>
     <header><a className="arcade" href="https://www.oleyarcade.com/">← OleyArcade</a><span className="edition">{phase.name === "playing" ? phase.place.name : "Garage preview"}</span></header>
     {phase.name === "playing"
-      ? <CombatSurface city={phase.city} vehicle={vehicle} difficulty={flow.difficulty} controls={controls} onChangePlace={flow.changePlace} />
+      ? <CombatSurface city={phase.city} place={phase.place} vehicle={vehicle} difficulty={flow.difficulty} controls={controls} progress={progress} onChangePlace={leaveMatch} />
       : <>
         <section className="intro" aria-labelledby="title"><p className="eyebrow">The world is your arena</p><h1 id="title">WRECK<span>TERRA</span></h1><p className="lede">Take the scenic route.<br/>Leave a wreck.</p></section>
         <StartScreen flow={flow} search={placeSearch} selected={selected} onSelectVehicle={setSelected} createMap={createMap} />
+        {phase.name === "start" && <Garage store={progress} />}
         <footer><strong>New York is up first.</strong><p>The driving prototype is in development. This garage lets you preview the original starter vehicles.</p></footer>
       </>}
   </main>;
