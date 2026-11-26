@@ -8,6 +8,7 @@ import type { EventBus } from "../sim/world";
 import { CombatEffects } from "./CombatEffects";
 import { ChaseCamera, type ChaseTarget } from "./ChaseCamera";
 import { createCityMaterials, createSkyGeometry, FACADE_PALETTES, facadeVariant, GROUND_FLOOR_M, FLOOR_HEIGHT_M, HAZE, ROAD_TILE_M, TILE_WIDTH_M, type CityMaterials } from "./cityMaterials";
+import { FRAME_WINDOW, nextQuality, QUALITY_LEVELS, renderPixelRatio, sustainedFrameTime, type QualityLevel } from "./quality";
 import type { Held } from "./TouchControls";
 
 type V3 = [number, number, number];
@@ -567,41 +568,20 @@ function SkyDome({ materials }: { materials: CityMaterials }) {
   return <mesh ref={mesh} geometry={geometry} material={materials.sky} renderOrder={-10} frustumCulled={false} dispose={null} />;
 }
 
-export interface QualityLevel { scale: number; shadow: number }
-/** From cheapest to richest: render resolution scale and shadow map size. Physics never changes. */
-export const QUALITY_LEVELS: readonly QualityLevel[] = [
-  { scale: 0.55, shadow: 0 },
-  { scale: 0.75, shadow: 512 },
-  { scale: 1, shadow: 1024 },
-  { scale: 1.25, shadow: 2048 },
-];
+export { nextQuality, QUALITY_LEVELS, type QualityLevel };
 
-/** Decide the next quality level from a window of frame times (seconds). */
-export function nextQuality(level: number, averageFrame: number, goodWindows: number): { level: number; goodWindows: number } {
-  if (averageFrame > 1 / 38 && level > 0) return { level: level - 1, goodWindows: 0 };
-  if (averageFrame < 1 / 55) {
-    if (goodWindows + 1 >= 3 && level < QUALITY_LEVELS.length - 1) return { level: level + 1, goodWindows: 0 };
-    return { level, goodWindows: goodWindows + 1 };
-  }
-  return { level, goodWindows: 0 };
-}
-
+/** Measures frame times and moves the level. The level reaches the renderer only through the Canvas props. */
 function QualityGovernor({ level, onLevel }: { level: number; onLevel: (level: number) => void }) {
-  const setDpr = useThree((s) => s.setDpr);
-  const frames = useRef({ n: 0, sum: 0, warm: 0, good: 0, level });
+  const frames = useRef({ window: [] as number[], warm: 0, good: 0, level });
   frames.current.level = level;
-  useEffect(() => {
-    const device = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    setDpr(Math.max(0.5, Math.min(2, device) * QUALITY_LEVELS[level]!.scale));
-  }, [level, setDpr]);
   useFrame((_, delta) => {
     const f = frames.current;
     if (f.warm < 90) { f.warm += 1; return; } // shaders compile on the first frames
-    f.n += 1;
-    f.sum += Math.min(delta, 0.25);
-    if (f.n < 60) return;
-    const next = nextQuality(f.level, f.sum / f.n, f.good);
-    f.n = 0; f.sum = 0; f.good = next.goodWindows;
+    f.window.push(Math.min(delta, 0.25));
+    if (f.window.length < FRAME_WINDOW) return;
+    const next = nextQuality(f.level, sustainedFrameTime(f.window), f.good);
+    f.window.length = 0;
+    f.good = next.goodWindows;
     if (next.level !== f.level) { f.level = next.level; onLevel(next.level); }
   });
   return null;
@@ -636,6 +616,8 @@ export function CityScene({ city, match, bus, colors, maxSpeed }: CitySceneProps
   const [level, setLevel] = useState(coarse ? 1 : 2);
   const [lost, setLost] = useState(false);
   const [epoch, setEpoch] = useState(0);
+  // The Canvas re-applies its dpr on every render and resize, so the level's ratio has to be that prop.
+  const dpr = renderPixelRatio(level, typeof window !== "undefined" ? window.devicePixelRatio : 1);
   const start = match.snapshot().vehicles[0]!;
   const pose = useRef<ChaseTarget>({ x: start.x, z: start.z, heading: start.heading, speed: 0 });
   const live = useRef<CombatSnapshot>(match.snapshot());
@@ -647,7 +629,7 @@ export function CityScene({ city, match, bus, colors, maxSpeed }: CitySceneProps
       {lost
         ? <p role="status" className="city-lost" style={{ margin: 0, padding: "1rem", color: "#26323d" }}>The graphics context was lost. Recovering the view…</p>
         : (
-          <Canvas key={epoch} shadows camera={{ fov: 62, near: 0.5, far: 1100, position: [start.x, 5, start.z - 9] }}
+          <Canvas key={epoch} dpr={dpr} shadows camera={{ fov: 62, near: 0.5, far: 1100, position: [start.x, 5, start.z - 9] }}
             gl={{ antialias: false, powerPreference: "high-performance", alpha: false }} style={{ touchAction: "none" }}
             onCreated={({ gl }) => {
               gl.domElement.addEventListener("webglcontextlost", (event) => { event.preventDefault(); setLost(true); });
