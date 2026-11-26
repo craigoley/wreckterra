@@ -187,6 +187,7 @@ describe("WRECK-T2: solo page lifecycle", () => {
   });
 
   it("WRECK-T2: the running app holds the match through hiding, context loss and a retry", async () => {
+    const realTimeout = globalThis.setTimeout;
     vi.useFakeTimers();
     vi.stubGlobal("WebGL2RenderingContext", class {});
     const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ getExtension: () => null } as never);
@@ -199,12 +200,20 @@ describe("WRECK-T2: solo page lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Play pinned Midtown" }));
-    await vi.dynamicImportSettled();
-    await settle();
-    const match = create.mock.results.at(-1)!.value as CombatAuthority;
-    const matches = create.mock.calls.length;
     const resume = () => screen.queryByRole("button", { name: "Paused — tap to resume" });
     const canvas = () => screen.getByTestId("city-canvas");
+    // React reveals a lazy view on the real clock, which advancing fake time does not move.
+    const canvasShown = async () => {
+      await vi.dynamicImportSettled();
+      for (let tries = 0; tries < 100 && !screen.queryByTestId("city-canvas"); tries += 1) {
+        await new Promise<void>((done) => { realTimeout(() => done(), 50); });
+        await settle();
+      }
+      return canvas();
+    };
+    await canvasShown();
+    const match = create.mock.results.at(-1)!.value as CombatAuthority;
+    const matches = create.mock.calls.length;
     await run(500);
     expect(match.snapshot().tick).toBeGreaterThan(10);
 
@@ -245,10 +254,8 @@ describe("WRECK-T2: solo page lifecycle", () => {
     expect(resume()).toBeNull();
     // Restart is a tap too, but it cannot run a match nobody can see.
     fireEvent.click(screen.getByRole("button", { name: "Retry the 3D view" }));
-    await vi.dynamicImportSettled();
-    await settle();
+    expect(await canvasShown()).not.toBe(second);
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(canvas()).not.toBe(second);
     expect(drawn.at(-1)).toBe(match);
     expect(match.snapshot().tick).toBe(strandedAt);
     expect(create.mock.calls.length).toBe(matches);
@@ -276,11 +283,10 @@ describe("WRECK-T2: solo page lifecycle", () => {
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     context.mockReturnValue({ getExtension: () => null } as never);
     fireEvent.click(screen.getByRole("button", { name: "Retry the 3D view" }));
-    await vi.dynamicImportSettled();
-    await settle();
+    expect(await canvasShown()).toBeTruthy();
+    expect(dry.snapshot().tick).toBe(0);
     fireEvent.click(resume()!);
     await run(200);
-    expect(canvas()).toBeTruthy();
     expect(dry.snapshot().tick).toBeGreaterThan(0);
   }, 30_000);
 });
