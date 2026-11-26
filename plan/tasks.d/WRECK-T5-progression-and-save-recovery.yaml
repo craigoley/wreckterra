@@ -21,7 +21,6 @@
     - tests/unit/progress.test.ts
     - tests/e2e/save-recovery.spec.ts
   status: queued
-  dispatch_hold: true
   attempts: 0
   rationale: The operator authorized a mobile-first original-IP real-location combat game built by Remudero through Console. Existing repo ID 1432832754 must be adopted. This initial plan is held until the actual runner/App/bootstrap gates are verified; release only the accepted frontier, preserving existing jobs and budgets.
   design: Create account-free versioned local saves with migrations, idempotent per-match rewards and export/import. Recover corrupt/evicted storage explicitly. Unlock sidegrade vehicles/loadouts and mastery cosmetics with test-drive access, not escalating damage or pay-to-win. Curated World Tour and survival contracts may grant passport badges; map search/favorites/travel are never grind gated. Ordinary exploration fuel unlimited, no forced daily attendance or energy timer. Save before leaving/checkpoint/renderer loss and keep durable progress separate from GPU resources. Offline results are unverified until later authoritative economy migration; no fabricated cross-device sync. The production call-site proof pins awardMatch in src/App.tsx; implement that actual runtime integration, never a comment or unused wrapper.
